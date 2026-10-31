@@ -677,72 +677,7 @@ That is the sweet spot.
 
 ---
 
-## 9. Coverage assessment
-
-A realistic assessment of coverage today:
-
-- Core mental model differences: 95%
-- Conversion table of common primitives: 90%
-- State management translation: 90%
-- Layout and composition: 85%
-- Input and interaction: 85%
-- Async/event loop: 80%
-- Navigation and screen flow: 80%
-- Styling and theme: 75%
-- Forms and validation: 75%
-- Dialogs and overlays: 70%
-- Data tables and lists: 70%
-- Animation: 65%
-- Framework abstraction design: 60–70%
-
-This means the repository is strong as a translation catalog and guide, but not yet complete as a blueprint for a production Flutter-like library.
-
-If we want to make it truly complete, the remaining work is mainly concentrated in three areas:
-
-1. full widget translation inventory
-2. advanced UI patterns (dialogs, tables, gestures, animation)
-3. an actual library architecture proposal for a Flutter-like egui abstraction
-
----
-
-## 10. Recommended final shape of the repo
-
-The repository is best positioned as a combination of:
-
-- conceptual translations
-- code examples
-- mental model guide
-- architecture direction for a Flutter-like egui abstraction
-
-Suggested structure:
-
-```text
-README.md
-  - overview and translation matrix
-  - widget mappings
-  - app architecture sections
-  - code examples
-  - future abstraction design
-
-examples/
-  - counter-app.rs
-  - form-app.rs
-  - search-list.rs
-  - dashboard.rs
-  - async-loader.rs
-
-docs/
-  - widget-map.md
-  - state-model.md
-  - async-patterns.md
-  - abstraction-design.md
-```
-
-This makes the repo both educational and extensible.
-
----
-
-## 11. Final takeaway
+## 9. Final takeaway
 
 The central truth is simple:
 
@@ -757,6 +692,6 @@ If the repo teaches that shift clearly, it will be highly valuable to developers
 
 ---
 
-## 12. License
+## 10. License
 
 This repository is intended as a learning and translation reference for developers moving from Dart/Flutter to Rust/egui.
