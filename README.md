@@ -960,6 +960,597 @@ GestureDetector             | Response hover/click/drag checks
 
 ---
 
+## Expanded code examples: Dart/Flutter to Rust/egui
+
+The best way to internalize the translation is to compare real application patterns side by side. The following examples illustrate the conceptual mapping between Flutter/Dart idioms and the Rust/egui equivalent.
+
+### 1. Counter app with stateful widget semantics
+
+Flutter:
+
+```dart
+import 'package:flutter/material.dart';
+
+void main() => runApp(const CounterApp());
+
+class CounterApp extends StatefulWidget {
+  const CounterApp({super.key});
+
+  @override
+  State<CounterApp> createState() => _CounterAppState();
+}
+
+class _CounterAppState extends State<CounterApp> {
+  int count = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('Count: $count'),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () => setState(() => count++),
+                child: const Text('Increment'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+```
+
+Rust/egui:
+
+```rust
+use eframe::egui;
+
+struct CounterApp {
+    count: i32,
+}
+
+impl Default for CounterApp {
+    fn default() -> Self {
+        Self { count: 0 }
+    }
+}
+
+impl eframe::App for CounterApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.label(format!("Count: {}", self.count));
+                ui.add_space(12.0);
+
+                if ui.button("Increment").clicked() {
+                    self.count += 1;
+                }
+            });
+        });
+    }
+}
+```
+
+Translation:
+
+- `StatefulWidget` becomes the app struct with internal mutable fields.
+- `setState` becomes direct mutation of state, followed by redraw if needed.
+- `MaterialApp` becomes the app runtime and root UI shell.
+- `Scaffold` becomes `CentralPanel` and optional top/bottom panels.
+
+---
+
+### 2. Form / text field with validation
+
+Flutter:
+
+```dart
+class LoginForm extends StatefulWidget {
+  const LoginForm({super.key});
+
+  @override
+  State<LoginForm> createState() => _LoginFormState();
+}
+
+class _LoginFormState extends State<LoginForm> {
+  final emailController = TextEditingController();
+  String error = '';
+
+  void submit() {
+    final email = emailController.text.trim();
+    setState(() {
+      error = email.contains('@') ? '' : 'Invalid email';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        TextField(
+          controller: emailController,
+          decoration: const InputDecoration(labelText: 'Email'),
+        ),
+        const SizedBox(height: 8),
+        ElevatedButton(onPressed: submit, child: const Text('Submit')),
+        if (error.isNotEmpty) Text(error),
+      ],
+    );
+  }
+}
+```
+
+Rust/egui:
+
+```rust
+struct LoginFormState {
+    email: String,
+    error: String,
+}
+
+impl LoginFormState {
+    fn submit(&mut self) {
+        if self.email.trim().contains('@') {
+            self.error.clear();
+        } else {
+            self.error = "Invalid email".to_string();
+        }
+    }
+}
+
+impl eframe::App for LoginFormState {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.vertical(|ui| {
+                ui.label("Email");
+                ui.text_edit_singleline(&mut self.email);
+                ui.add_space(8.0);
+
+                if ui.button("Submit").clicked() {
+                    self.submit();
+                }
+
+                if !self.error.is_empty() {
+                    ui.colored_label(egui::Color32::RED, &self.error);
+                }
+            });
+        });
+    }
+}
+```
+
+Translation:
+
+- `TextField` becomes `ui.text_edit_singleline(&mut self.email)`
+- validation logic is direct Rust logic in the app or screen state
+- `setState` is replaced by mutating fields and re-rendering in the next frame
+- `Text` error handling becomes `ui.colored_label`
+
+---
+
+### 3. ListView with search and filtering
+
+Flutter:
+
+```dart
+class SearchList extends StatefulWidget {
+  const SearchList({super.key});
+
+  @override
+  State<SearchList> createState() => _SearchListState();
+}
+
+class _SearchListState extends State<SearchList> {
+  final items = ['Alpha', 'Beta', 'Gamma', 'Delta'];
+  String query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = items
+        .where((item) => item.toLowerCase().contains(query.toLowerCase()))
+        .toList();
+
+    return Column(
+      children: [
+        TextField(
+          onChanged: (value) => setState(() => query = value),
+          decoration: const InputDecoration(labelText: 'Search'),
+        ),
+        Expanded(
+          child: ListView(
+            children: filtered.map((item) => ListTile(title: Text(item))).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+```
+
+Rust/egui:
+
+```rust
+struct SearchListState {
+    items: Vec<String>,
+    query: String,
+}
+
+impl SearchListState {
+    fn filtered_items(&self) -> Vec<&str> {
+        self.items
+            .iter()
+            .filter(|item| item.to_lowercase().contains(&self.query.to_lowercase()))
+            .map(|s| s.as_str())
+            .collect()
+    }
+}
+
+impl eframe::App for SearchListState {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.vertical(|ui| {
+                ui.text_edit_singleline(&mut self.query);
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for item in self.filtered_items() {
+                        ui.horizontal(|ui| {
+                            ui.label(item);
+                        });
+                    }
+                });
+            });
+        });
+    }
+}
+```
+
+Translation:
+
+- `TextField` -> `ui.text_edit_singleline(&mut self.query)`
+- `ListView` -> `ScrollArea::vertical()` + loop of rendered items
+- filtering logic is plain Rust logic, often computed on demand
+
+---
+
+### 4. Tabbed navigation using a screen enum
+
+Flutter:
+
+```dart
+class DashboardView extends StatefulWidget {
+  const DashboardView({super.key});
+
+  @override
+  State<DashboardView> createState() => _DashboardViewState();
+}
+
+class _DashboardViewState extends State<DashboardView> {
+  int selectedIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      const Text('Home'),
+      const Text('Settings'),
+      const Text('Profile'),
+    ];
+
+    return Scaffold(
+      body: pages[selectedIndex],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: selectedIndex,
+        onTap: (i) => setState(() => selectedIndex = i),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+        ],
+      ),
+    );
+  }
+}
+```
+
+Rust/egui:
+
+```rust
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Screen {
+    Home,
+    Settings,
+    Profile,
+}
+
+struct DashboardState {
+    screen: Screen,
+}
+
+impl eframe::App for DashboardState {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::TopBottomPanel::bottom("nav").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.selectable_value(&mut self.screen, Screen::Home, "Home").clicked() {
+                    self.screen = Screen::Home;
+                }
+                if ui.selectable_value(&mut self.screen, Screen::Settings, "Settings").clicked() {
+                    self.screen = Screen::Settings;
+                }
+                if ui.selectable_value(&mut self.screen, Screen::Profile, "Profile").clicked() {
+                    self.screen = Screen::Profile;
+                }
+            });
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            match self.screen {
+                Screen::Home => ui.label("Home"),
+                Screen::Settings => ui.label("Settings"),
+                Screen::Profile => ui.label("Profile"),
+            };
+        });
+    }
+}
+```
+
+Translation:
+
+- `BottomNavigationBar` -> bottom panel with `selectable_value`
+- `selectedIndex` -> enum state
+- route and screen switching are explicit app state transitions
+
+---
+
+### 5. Async `FutureBuilder` model with Rust channels
+
+Flutter:
+
+```dart
+FutureBuilder<String>(
+  future: fetchUserName(),
+  builder: (context, snapshot) {
+    if (snapshot.connectionState == ConnectionState.waiting) {
+      return const CircularProgressIndicator();
+    }
+    return Text(snapshot.data ?? 'Unknown');
+  },
+)
+```
+
+Rust/egui:
+
+```rust
+use std::sync::mpsc;
+
+struct AsyncState {
+    loading: bool,
+    name: String,
+    rx: Option<mpsc::Receiver<String>>,
+}
+
+impl AsyncState {
+    fn start_load(&mut self) {
+        let (tx, rx) = mpsc::channel();
+        self.rx = Some(rx);
+        self.loading = true;
+
+        std::thread::spawn(move || {
+            let result = fetch_name();
+            tx.send(result).unwrap();
+        });
+    }
+}
+
+impl eframe::App for AsyncState {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(rx) = &self.rx {
+            if let Ok(name) = rx.try_recv() {
+                self.name = name;
+                self.loading = false;
+                self.rx = None;
+                ctx.request_repaint();
+            }
+        }
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if self.loading {
+                ui.spinner();
+            } else {
+                ui.label(&self.name);
+            }
+
+            if ui.button("Load").clicked() {
+                self.start_load();
+            }
+        });
+    }
+}
+```
+
+Translation:
+
+- `FutureBuilder` becomes a background task + result channel + repaint trigger
+- loading state becomes `bool`
+- `ConnectionState.waiting` becomes checking whether a receiver is active or data is pending
+
+---
+
+### 6. Theme and styling equivalence
+
+Flutter:
+
+```dart
+Theme(
+  data: ThemeData(
+    colorScheme: ColorScheme.dark(),
+    textTheme: Theme.of(context).textTheme.apply(fontSizeFactor: 1.2),
+  ),
+  child: Text('Styled UI'),
+)
+```
+
+Rust/egui:
+
+```rust
+fn update_theme(ctx: &egui::Context) {
+    let mut visuals = egui::Visuals::dark();
+    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(30, 30, 35);
+    visuals.override_text_color = Some(egui::Color32::WHITE);
+    ctx.set_visuals(visuals);
+}
+
+impl eframe::App for AppState {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        update_theme(ctx);
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Styled UI");
+            ui.label("Theme is configured via egui style and visuals");
+        });
+    }
+}
+```
+
+Translation:
+
+- `ThemeData` -> `egui::Visuals`
+- `TextTheme` -> fonts, colors, and typography adjustments
+- theme adjustments are explicit and runtime-configurable
+
+---
+
+### 7. Reusable component pattern: card-like widget
+
+Flutter:
+
+```dart
+class StatCard extends StatelessWidget {
+  final String title;
+  final int value;
+
+  const StatCard({super.key, required this.title, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Text(title),
+            const SizedBox(height: 8),
+            Text('$value'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+```
+
+Rust/egui:
+
+```rust
+fn stat_card(ui: &mut egui::Ui, title: &str, value: i32) {
+    ui.group(|ui| {
+        ui.set_min_height(80.0);
+        ui.vertical(|ui| {
+            ui.label(title);
+            ui.add_space(8.0);
+            ui.label(value.to_string());
+        });
+    });
+}
+
+impl eframe::App for AppState {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                stat_card(ui, "Tasks", self.task_count);
+                stat_card(ui, "Errors", self.error_count);
+            });
+        });
+    }
+}
+```
+
+Translation:
+
+- Flutter card widget -> `ui.group()` with a styled container
+- `StatelessWidget` -> plain function or reusable helper
+- layout composition stays explicit and local
+
+---
+
+## Practical design patterns for a Flutter-like egui abstraction
+
+If you decide to design a Flutter-like abstraction on top of egui, these patterns will feel most natural to Flutter developers:
+
+### 1. A `Widget` trait with builder semantics
+
+```rust
+trait Widget {
+    fn build(&self, ctx: &mut BuildContext);
+}
+```
+
+This allows simple element composition without needing a framework-managed retained tree.
+
+### 2. A `State<T>` layer
+
+```rust
+trait Stateful {
+    type Value;
+    fn value(&self) -> &Self::Value;
+    fn set(&mut self, value: Self::Value);
+}
+```
+
+This gives developers a familiar mental model while staying compatible with immediate-mode UI.
+
+### 3. A runtime `BuildContext`
+
+```rust
+struct BuildContext<'a> {
+    ui: &'a mut egui::Ui,
+    theme: &'a Theme,
+    app: &'a mut dyn AppRuntime,
+}
+```
+
+This can hold metadata like widget identity, layout constraints, and theme access.
+
+### 4. A screen or route enum
+
+```rust
+enum Route {
+    Home,
+    Profile,
+    Settings,
+}
+```
+
+This is the cleanest way to map Flutter navigation to Rust stateful app logic.
+
+### 5. A command/event model
+
+```rust
+enum AppEvent {
+    Increment,
+    Save,
+    OpenSettings,
+}
+```
+
+This creates a good separation between UI event handling and state mutation.
+
+---
+
 ## Final takeaway
 
 Flutter and egui are not equivalent in implementation model, but they are equivalent in intent: both provide a mechanism for expressing interactive UI, responding to user input, and mapping state to visible output.
