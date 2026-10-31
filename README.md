@@ -4,7 +4,11 @@ A technical field guide for mapping Dart/Flutter and Rust/egui mental models.
 
 This repository is intended as a practical translation catalog: a reference for understanding how concepts from Dart/Flutter map onto Rust and egui architecture, rendering, input, state, layout, async work, and application structure.
 
-The goal is to help Dart/Flutter developers map their existing mental model onto Rust/egui without pretending that the two frameworks are identical. The translation is conceptual and architectural: understand the problem, then express the solution in the idioms that fit Rust and egui.
+The goal is to help Dart/Flutter developers map their existing mental model onto Rust/egui without pretending that the two frameworks are identical. The translation is conceptual and architectural:
+
+- same problem domain
+- different runtime model
+- different ownership and scheduling rules
 
 ---
 
@@ -12,9 +16,9 @@ The goal is to help Dart/Flutter developers map their existing mental model onto
 
 Dart/Flutter and egui serve the same high-level purpose: interactive UI generation. They do this through different runtime models.
 
-Flutter is a retained, declarative UI framework built around a widget tree, element tree, render objects, and rebuild scheduling. Developers describe UI by composition, and the framework reconciles those descriptions into painting and input handling.
+Flutter is a retained, declarative UI framework built around a widget tree, element tree, render objects, and rebuild scheduling. Developers describe UI by composition, and the framework reconciles the tree against the previous render pass.
 
-egui is an immediate-mode GUI library. Developers emit UI commands each frame from the current app state. User interactions are interpreted through response objects, and the app decides when to repaint.
+egui is an immediate-mode GUI library. Developers emit UI commands each frame from the current app state. User interactions are interpreted through response objects, and the app decides when to re-render and how to respond to inputs.
 
 The crucial translation is not:
 
@@ -108,9 +112,56 @@ The mental model is:
 - input is consumed through `Response` values
 - repaint is explicit and intentional
 
+### 2.1 Edge cases that feel different in practice
+
+The basic translation works, but real-world UI bugs usually show up in edge cases where framework identity, lifecycle, and timing matter.
+
+#### Dart/Flutter edge cases
+
+- List reordering without keys: the framework can attach state to the wrong item when items move, insert, or delete.
+- Build-time side effects: calling `setState` while a build is in progress or from a lifecycle callback can create difficult-to-debug loops.
+- Async cancellation: `FutureBuilder`/`StreamBuilder` can emit after disposal; stale updates may need `mounted` checks or canceled subscriptions.
+- Focus and text controllers: editing state is often split between widget state, `TextEditingController`, and the current focus tree.
+- Layout overflow: `RenderFlex` constraints and intrinsic sizing often surface as `RenderFlex overflowed` or unbounded width/height issues.
+- Dependencies and inherited state: a widget may read context from a parent unexpectedly, making architecture and testing harder.
+
+#### Rust/egui edge cases
+
+- No retained widget tree: state is not automatically reattached to widgets, so identity must be managed deliberately via data and `egui::Id`.
+- Input consumption timing: a `Response` is meaningful only for the current frame; reusing it later is a common source of stale-UI logic bugs.
+- Repaint scheduling: if the app mutates state without `ctx.request_repaint()`, the UI may look frozen until another event causes a refresh.
+- Layout without a fixed widget tree: overflow, clipping, and scrolling are usually solved by explicit `ScrollArea`, `allocate_ui`, or custom layout helpers.
+- Async ownership: channels, watchers, and worker threads must be carefully integrated with the frame loop, or tasks may update state after the UI has moved on.
+- Borrowing inside the UI closure: the immediate-mode model is ergonomic, but Rust borrowing rules can feel stricter when a closure mutates state while also reading it for rendering.
+
+#### The unifying rule
+
+Both systems have the same class of problems, but they solve them with different primitives:
+
+- Flutter keeps identity inside the framework and exposes it through widget tree semantics.
+- egui keeps identity as a design choice of the app author and exposes it through state, IDs, and frame-driven logic.
+
+In other words, Flutter hides a lot of identity management; egui requires the app to do it explicitly.
+
 ---
 
-## 3. High-confidence translation matrix
+## 3. Cross-language edge-case translation map
+
+| Problem pattern | Dart/Flutter mental model | Rust/egui equivalent | Translation rule |
+| --- | --- | --- | --- |
+| unstable list identity | `Key` / `ValueKey` / `UniqueKey` | row state + explicit `egui::Id` or data ordering | preserve identity across frame updates |
+| state update after async completion | `FutureBuilder` / `StreamBuilder` / `mounted` checks | channel/receiver + repaint guard | do not mutate stale UI from dead tasks |
+| focus and input capture | `TextEditingController` + focus node | `TextEdit` state + `ui.memory()` + `Response` | keep current interaction state in app-owned data |
+| modal flow | route builder + `Navigator` + `showDialog` | state enum + `egui::Window` + click handlers | turn navigation into state transitions |
+| layout overflow | constraints, `RenderFlex`, `Expanded`, `Flexible` | `ScrollArea`, `ui.allocate_ui`, custom sizing | model layout as explicit allocation rules |
+| animation | `AnimationController` + `Tween` + rebuild | time-based state + `ctx.request_repaint()` | drive motion from frame time, not widget identity |
+| shared data across widgets | inherited widgets / provider / context | app state, shared structs, message channels | move shared state into explicit owners |
+
+The bridge between the two worlds is not “same API, different syntax.” It is “same UI problem, different runtime contract.”
+
+---
+
+## 4. High-confidence translation matrix
 
 | Dart/Flutter concept | Rust / egui equivalent | Practical translation |
 | --- | --- | --- |
@@ -147,9 +198,9 @@ The mental model is:
 
 ---
 
-## 4. App lifecycle and state translation
+## 5. App lifecycle and state translation
 
-### 4.1 Dart/Flutter app structure
+### 5.1 Dart/Flutter app structure
 
 Flutter apps usually begin with a root widget and a rebuild-driven tree:
 
@@ -158,7 +209,7 @@ Flutter apps usually begin with a root widget and a rebuild-driven tree:
 - `build()` returns UI as composition
 - `setState` re-renders part of the tree
 
-### 4.2 egui app structure
+### 5.2 egui app structure
 
 egui apps typically revolve around one app struct with frame-based rendering:
 
@@ -193,7 +244,7 @@ The translation is straightforward:
 
 ---
 
-## 5. Widget-to-UI mapping catalog
+## 6. Widget-to-UI mapping catalog
 
 ### Basic widgets
 
@@ -269,9 +320,9 @@ The translation is straightforward:
 
 ---
 
-## 6. Pattern translations that matter in practice
+## 7. Pattern translations that matter in practice
 
-### 6.1 Dialogs and modal flows
+### 7.1 Dialogs and modal flows
 
 Flutter uses `showDialog` with a builder function. In egui, modal behavior is expressed as app state plus an `egui::Window`.
 
@@ -330,7 +381,7 @@ Translation:
 - `showDialog` -> modal state + `egui::Window`
 - dialog actions -> click handlers that mutate state
 
-### 6.2 Forms and validation
+### 7.2 Forms and validation
 
 Flutter form patterns usually combine controllers and validation logic. In egui, the common approach is to keep the form values in app state and validate on submit.
 
@@ -373,7 +424,7 @@ impl eframe::App for FormState {
 }
 ```
 
-### 6.3 Data tables
+### 7.3 Data tables
 
 Flutter uses `DataTable` for structured records. In egui, the equivalent is usually a manual row loop with a scroll area.
 
@@ -422,7 +473,7 @@ impl eframe::App for TableState {
 }
 ```
 
-### 6.4 Async + reactive state updates
+### 7.4 Async + reactive state updates
 
 Flutter commonly uses `FutureBuilder` or `StreamBuilder` to react to asynchronous data. In egui, the equivalent is usually a channel-based or watch-based state update + repaint.
 
@@ -476,7 +527,7 @@ impl eframe::App for AsyncState {
 
 This is roughly the same design intention as a Flutter `FutureBuilder`, but expressed with explicit Rust state and runtime control.
 
-### 6.5 Animation and motion
+### 7.5 Animation and motion
 
 Flutter relies on `AnimationController`, `Tween`, and rebuild-driven animation. In egui, animation is usually implemented with time-state and repaint requests.
 
@@ -512,7 +563,7 @@ Translation:
 
 ---
 
-## 7. State architecture patterns in real applications
+## 8. State architecture patterns in real applications
 
 A Dart/Flutter developer usually thinks in terms of widget trees. The Rust equivalent is usually an explicit state model.
 
@@ -548,7 +599,7 @@ This pattern maps naturally to the mental model of a Dart/Flutter app that react
 
 ---
 
-## 8. Designing a Dart/Flutter-like abstraction over egui
+## 9. Designing a Dart/Flutter-like abstraction over egui
 
 This is the most valuable next step beyond raw translation.
 
@@ -621,11 +672,11 @@ That is the sweet spot: familiar mental structure, Rust-native execution model.
 
 ---
 
-## 9. Final takeaway
+## 10. Final takeaway
 
 The central truth is simple:
 
-Dart/Flutter developers already know the difficult parts of UI development: composition, layout, state, interaction, navigation, theming, forms, async updates, and architecture. Those ideas all transfer to Rust/egui.
+Dart/Flutter developers already know the difficult parts of UI development: composition, layout, state, interaction, navigation, theming, forms, async updates, and architecture. Those ideas all transfer to egui, but the runtime model changes.
 
 The only thing that changes is the runtime model:
 
@@ -636,6 +687,6 @@ If this repository teaches that shift clearly, it will be highly valuable for de
 
 ---
 
-## 10. License
+## 11. License
 
 This repository is intended as a learning and translation reference for developers moving from Dart/Flutter to Rust/egui.
