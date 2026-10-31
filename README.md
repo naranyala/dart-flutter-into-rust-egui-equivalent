@@ -119,20 +119,36 @@ The basic translation works, but real-world UI bugs usually show up in edge case
 #### Dart/Flutter edge cases
 
 - List reordering without keys: the framework can attach state to the wrong item when items move, insert, or delete.
+- Rebuild loops caused by `setState` inside `build`, or by provider/store churn that triggers repeated refreshes.
 - Build-time side effects: calling `setState` while a build is in progress or from a lifecycle callback can create difficult-to-debug loops.
 - Async cancellation: `FutureBuilder`/`StreamBuilder` can emit after disposal; stale updates may need `mounted` checks or canceled subscriptions.
 - Focus and text controllers: editing state is often split between widget state, `TextEditingController`, and the current focus tree.
-- Layout overflow: `RenderFlex` constraints and intrinsic sizing often surface as `RenderFlex overflowed` or unbounded width/height issues.
+- Theme, locale, and media-query changes: a configuration change can cascade into large rebuild trees and expensive recomputation.
 - Dependencies and inherited state: a widget may read context from a parent unexpectedly, making architecture and testing harder.
+- `RenderFlex` overflow and unbounded layout: nested rows/columns and scroll containers often expose intrinsic sizing problems.
+- Hero and route transition timing: animations or navigation can end with stale routes or disappearing state.
+- Gesture conflicts: taps, drags, and scroll gestures can fight each other if event handling is not explicit.
+- Keyboard composition issues: IME input, emoji, and mobile text fields can produce surprising cursor and composition state behavior.
+- Animation disposal and ticker lifecycle: a screen can be rebuilt while an animation is still active or disposed.
+- Scroll restoration and page storage: reusing a widget tree can preserve stale scroll positions or selected items.
+- Accessibility semantics timing: screen-reader announcements and focus changes can lag behind visual updates.
 
 #### Rust/egui edge cases
 
 - No retained widget tree: state is not automatically reattached to widgets, so identity must be managed deliberately via data and `egui::Id`.
+- `egui::Id` collisions: reused IDs across panels or screens can cause stale widget state and unexpectedly shared controls.
 - Input consumption timing: a `Response` is meaningful only for the current frame; reusing it later is a common source of stale-UI logic bugs.
 - Repaint scheduling: if the app mutates state without `ctx.request_repaint()`, the UI may look frozen until another event causes a refresh.
 - Layout without a fixed widget tree: overflow, clipping, and scrolling are usually solved by explicit `ScrollArea`, `allocate_ui`, or custom layout helpers.
 - Async ownership: channels, watchers, and worker threads must be carefully integrated with the frame loop, or tasks may update state after the UI has moved on.
 - Borrowing inside the UI closure: the immediate-mode model is ergonomic, but Rust borrowing rules can feel stricter when a closure mutates state while also reading it for rendering.
+- Background-thread state mutation: updating shared state from a worker thread while the UI frame is rendering can cause race conditions or inconsistent output.
+- Popup and modal focus ordering: custom windows and popups can steal focus in ways that feel surprising if the app is not managing interaction flow explicitly.
+- Custom painting ordering: overlapping shapes, overlays, and labels can layer incorrectly if draw order is not controlled.
+- DPI and scaling mismatches: window resizing, high-DPI displays, and custom font sizing can desynchronize layout and painting.
+- High-frequency repaint loops: a loop that repaints on every frame without throttling can waste CPU and make simple interfaces feel sluggish.
+- Multi-window and multi-panel state bugs: UI state can be accidentally shared across windows, side panels, or tabs.
+- IME, clipboard, and multiline text issues: text editing needs explicit handling for paste, composition boundaries, and caret position updates.
 
 #### The unifying rule
 
@@ -143,6 +159,19 @@ Both systems have the same class of problems, but they solve them with different
 
 In other words, Flutter hides a lot of identity management; egui requires the app to do it explicitly.
 
+### 2.2 Shared edge-case taxonomy
+
+The strongest way to translate these bugs is to look past syntax and map the underlying pattern.
+
+- Identity management: `Key`, widget identity, and `egui::Id` all exist to preserve state across updates.
+- Update timing: `setState` after build, stale async callbacks, and stale `Response` values all represent timing bugs.
+- Asynchronous completion: `FutureBuilder`/`StreamBuilder` and channels both need lifecycle-aware handling.
+- Layout constraints: `RenderFlex`, scroll areas, and explicit `allocate_ui()` all deal with the same stress under resize and overflow.
+- Input ordering: click/drag/hover and focus transitions must be interpreted in the correct frame.
+- State ownership: when data crosses screens, modals, layers, or windows, ownership must be explicit in both frameworks.
+- Repaint and scheduling: visual output is either driven by rebuild scheduling or by frame repaint requests.
+- Multi-layer interaction: navigation, overlays, dialogs, and popups all fail when states are not isolated properly.
+
 ---
 
 ## 3. Cross-language edge-case translation map
@@ -150,12 +179,17 @@ In other words, Flutter hides a lot of identity management; egui requires the ap
 | Problem pattern | Dart/Flutter mental model | Rust/egui equivalent | Translation rule |
 | --- | --- | --- | --- |
 | unstable list identity | `Key` / `ValueKey` / `UniqueKey` | row state + explicit `egui::Id` or data ordering | preserve identity across frame updates |
+| rebuild loop | repeated `setState` / provider churn | repeated state mutation + repaint requests | avoid work that retriggers itself |
 | state update after async completion | `FutureBuilder` / `StreamBuilder` / `mounted` checks | channel/receiver + repaint guard | do not mutate stale UI from dead tasks |
 | focus and input capture | `TextEditingController` + focus node | `TextEdit` state + `ui.memory()` + `Response` | keep current interaction state in app-owned data |
 | modal flow | route builder + `Navigator` + `showDialog` | state enum + `egui::Window` + click handlers | turn navigation into state transitions |
 | layout overflow | constraints, `RenderFlex`, `Expanded`, `Flexible` | `ScrollArea`, `ui.allocate_ui`, custom sizing | model layout as explicit allocation rules |
+| route transition timing | navigator animation and route disposal | modal/window lifecycle + explicit state transitions | isolate old state from new state |
 | animation | `AnimationController` + `Tween` + rebuild | time-based state + `ctx.request_repaint()` | drive motion from frame time, not widget identity |
 | shared data across widgets | inherited widgets / provider / context | app state, shared structs, message channels | move shared state into explicit owners |
+| gesture conflict | tap/drag/scroll event ordering | hover/click/drag response ordering | handle interaction ordering explicitly |
+| accessibility and focus semantics | semantics tree + focus management | input state + UI memory + deliberate focus handling | keep mental model and visual state synchronized |
+| overlay ordering | route stack and overlay management | modal windows and custom painter layers | manage layer order as explicit state |
 
 The bridge between the two worlds is not “same API, different syntax.” It is “same UI problem, different runtime contract.”
 
