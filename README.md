@@ -1,16 +1,16 @@
 # Dart/Flutter to Rust/egui: Technical Translation Catalog
 
-A technical field guide for mapping Flutter and Dart mental models to Rust and egui.
+A technical field guide for mapping Dart/Flutter and Rust/egui mental models.
 
-This repository is intended as a practical translation catalog: a reference for understanding how concepts from Flutter/Dart map onto Rust/egui architecture, rendering, input, state, layout, async work, and application structure.
+This repository is intended as a practical translation catalog: a reference for understanding how concepts from Dart/Flutter map onto Rust and egui architecture, rendering, input, state, layout, async work, and application structure.
 
-The goal is to help Flutter developers map their existing mental model onto Rust/egui without pretending that the two frameworks are identical. The translation is conceptual and architectural: understand the problem, then express the solution in the idioms that fit Rust and egui.
+The goal is to help Dart/Flutter developers map their existing mental model onto Rust/egui without pretending that the two frameworks are identical. The translation is conceptual and architectural: understand the problem, then express the solution in the idioms that fit Rust and egui.
 
 ---
 
 ## 1. Executive summary
 
-Flutter and egui serve the same high-level purpose: interactive UI generation. They do this through different runtime models.
+Dart/Flutter and egui serve the same high-level purpose: interactive UI generation. They do this through different runtime models.
 
 Flutter is a retained, declarative UI framework built around a widget tree, element tree, render objects, and rebuild scheduling. Developers describe UI by composition, and the framework reconciles those descriptions into painting and input handling.
 
@@ -22,7 +22,7 @@ The crucial translation is not:
 
 The crucial translation is:
 
-- "Flutter state + rebuild model becomes Rust state + frame-driven UI emission."
+- "Dart/Flutter state + rebuild model becomes Rust state + frame-driven UI emission."
 
 In practical terms, the mental model shifts from:
 
@@ -38,7 +38,7 @@ This is the primary bridge between Dart/Flutter expertise and productivity in Ru
 
 ## 2. The core mental model difference
 
-### Flutter: retained widget graph
+### Dart/Flutter: retained widget graph
 
 Flutter builds a conceptual tree of widgets, and the framework manages identity, rebuild timing, and reconciliation.
 
@@ -112,7 +112,7 @@ The mental model is:
 
 ## 3. High-confidence translation matrix
 
-| Flutter / Dart concept | Rust / egui equivalent | Practical translation |
+| Dart/Flutter concept | Rust / egui equivalent | Practical translation |
 | --- | --- | --- |
 | `runApp` | `eframe::run_native` | Bootstraps the UI program |
 | `MaterialApp` | root `eframe::App` | App shell |
@@ -149,7 +149,7 @@ The mental model is:
 
 ## 4. App lifecycle and state translation
 
-### 4.1 Flutter app structure
+### 4.1 Dart/Flutter app structure
 
 Flutter apps usually begin with a root widget and a rebuild-driven tree:
 
@@ -187,9 +187,9 @@ impl eframe::App for MyApp {
 
 The translation is straightforward:
 
-- Flutter widget tree -> Rust state + immediate UI output
-- Flutter rebuild -> egui frame update
-- Flutter `setState` -> mutate a field + re-render on next frame
+- Dart/Flutter widget tree -> Rust state + immediate UI output
+- Dart/Flutter rebuild -> egui frame update
+- Dart/Flutter `setState` -> mutate a field + re-render on next frame
 
 ---
 
@@ -197,7 +197,7 @@ The translation is straightforward:
 
 ### Basic widgets
 
-| Flutter | egui equivalent |
+| Dart/Flutter | egui equivalent |
 | --- | --- |
 | `Text` | `ui.label()` |
 | `RichText` | custom label with formatting or `egui::TextFormat` |
@@ -214,7 +214,7 @@ The translation is straightforward:
 
 ### Input widgets
 
-| Flutter | egui equivalent |
+| Dart/Flutter | egui equivalent |
 | --- | --- |
 | `TextField` | `ui.text_edit_singleline()` / `text_edit_multiline()` |
 | `TextFormField` | custom form state + validation |
@@ -230,7 +230,7 @@ The translation is straightforward:
 
 ### Layout / composition
 
-| Flutter | egui equivalent |
+| Dart/Flutter | egui equivalent |
 | --- | --- |
 | `Column` | `ui.vertical()` |
 | `Row` | `ui.horizontal()` |
@@ -244,7 +244,7 @@ The translation is straightforward:
 
 ### Navigation / structure
 
-| Flutter | egui equivalent |
+| Dart/Flutter | egui equivalent |
 | --- | --- |
 | `Scaffold` | `CentralPanel` + `TopBottomPanel` + side panels |
 | `AppBar` | top toolbar panel |
@@ -258,7 +258,7 @@ The translation is straightforward:
 
 ### Data / content UI
 
-| Flutter | egui equivalent |
+| Dart/Flutter | egui equivalent |
 | --- | --- |
 | `Card` | `ui.group()` / custom card helper |
 | `ListTile` | horizontal row with label + actions |
@@ -514,7 +514,7 @@ Translation:
 
 ## 7. State architecture patterns in real applications
 
-A Flutter developer usually thinks in terms of widget trees. The Rust equivalent is usually an explicit state model.
+A Dart/Flutter developer usually thinks in terms of widget trees. The Rust equivalent is usually an explicit state model.
 
 ### Common patterns
 
@@ -544,19 +544,19 @@ enum AppEvent {
 }
 ```
 
-This pattern maps naturally to the mental model of a Flutter app that reacts to user events, but it is implemented with explicit Rust enums and state transitions instead of widget rebuild callbacks.
+This pattern maps naturally to the mental model of a Dart/Flutter app that reacts to user events, but it is implemented with explicit Rust enums and state transitions instead of widget rebuild callbacks.
 
 ---
 
-## 8. Designing a Flutter-like abstraction over egui
+## 8. Designing a Dart/Flutter-like abstraction over egui
 
 This is the most valuable next step beyond raw translation.
 
-The key idea is not to clone Flutter exactly. It is to create a Flutter-like developer interface that compiles down to egui runtime primitives.
+The key idea is not to clone Flutter exactly. It is to create a Dart/Flutter-like developer interface that compiles down to egui runtime primitives.
 
 ### Why this matters
 
-- familiar APIs for Flutter developers
+- familiar APIs for Dart/Flutter developers
 - preserves Rust ownership rules
 - keeps egui as the real rendering runtime
 - lowers migration friction for teams moving from Dart/Flutter
@@ -566,7 +566,7 @@ The key idea is not to clone Flutter exactly. It is to create a Flutter-like dev
 1. egui runtime layer
    - `Context`, `Ui`, `Response`, `Rect`, inputs
 
-2. Flutter-like app shell
+2. Dart/Flutter-like app shell
    - `App`, `MaterialApp`, `Scaffold`
 
 3. Stateful widget layer
@@ -611,7 +611,7 @@ impl App for MyApp {
 }
 ```
 
-This is intentionally “Flutter-like” at the API boundary, while using immediate-mode rendering under the hood.
+This is intentionally “Dart/Flutter-like” at the API boundary, while using immediate-mode rendering under the hood.
 
 ### Design principle
 
@@ -625,11 +625,11 @@ That is the sweet spot: familiar mental structure, Rust-native execution model.
 
 The central truth is simple:
 
-Flutter developers already know the difficult parts of UI development: composition, layout, state, interaction, navigation, theming, forms, async updates, and architecture. Those ideas all transfer to Rust/egui.
+Dart/Flutter developers already know the difficult parts of UI development: composition, layout, state, interaction, navigation, theming, forms, async updates, and architecture. Those ideas all transfer to Rust/egui.
 
 The only thing that changes is the runtime model:
 
-- Flutter: widget tree + rebuild system
+- Dart/Flutter: widget tree + rebuild system
 - egui: app state + immediate UI emissions + response-driven input
 
 If this repository teaches that shift clearly, it will be highly valuable for developers moving from Dart/Flutter into Rust GUI development.
