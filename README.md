@@ -2,7 +2,7 @@
 
 A technical field guide for mapping Dart/Flutter and Rust/egui mental models.
 
-This repository is intended as a practical translation catalog: a reference for understanding how concepts from Dart/Flutter map onto Rust and egui architecture, rendering, input, state, layout, async work, and application structure.
+This repository is intended as a practical translation catalog: a reference for understanding how concepts from Dart/Flutter map onto Rust/egui architecture, rendering, input, state, layout, async work, and application structure.
 
 The goal is to help Dart/Flutter developers map their existing mental model onto Rust/egui without pretending that the two frameworks are identical. The translation is conceptual and architectural:
 
@@ -14,7 +14,7 @@ The goal is to help Dart/Flutter developers map their existing mental model onto
 
 ## 1. Executive summary
 
-Dart/Flutter and egui serve the same high-level purpose: interactive UI generation. They do this through different runtime models.
+Dart/Flutter and Rust/egui serve the same high-level purpose: interactive UI generation. They do this through different runtime models.
 
 Flutter is a retained, declarative UI framework built around a widget tree, element tree, render objects, and rebuild scheduling. Developers describe UI by composition, and the framework reconciles the tree against the previous render pass.
 
