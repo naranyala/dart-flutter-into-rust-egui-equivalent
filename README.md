@@ -1,487 +1,48 @@
-# Dart/Flutter to Rust/egui: Translation Catalog
+# Dart/Flutter to Rust/egui: Technical Translation Catalog
 
-A practical guide for translating Dart/Flutter expertise into Rust + egui patterns and mental models.
+A technical field guide for mapping Flutter and Dart mental models to Rust and egui.
 
-This repository is a compact catalog of equivalent concepts, idioms, and implementation strategies so developers familiar with Flutter can quickly adapt to Rust GUI development with egui.
+This repository is intended as a practical translation catalog: a reference for understanding how concepts from Flutter/Dart map onto Rust/egui architecture, rendering, input, state, layout, async work, and application structure.
 
-## Why this matters
-
-Flutter and egui are built on very different philosophies:
-
-- Flutter is a retained, widget-tree UI framework with a declarative runtime.
-- egui is an immediate-mode GUI library in Rust that emphasizes simplicity, low ceremony, and direct UI commands.
-
-The goal is not to mimic Flutter exactly. The goal is to map your understanding of app structure, rendering, state, layout, and interaction into the Rust/egui world.
+The aim is not to mimic Flutter exactly. The aim is to help a developer who already understands Flutter think correctly about how to build equivalent applications in Rust using egui.
 
 ---
 
-## At a glance
+## Executive summary
 
-| Flutter/Dart concept | Rust/egui equivalent | Mental model |
-| --- | --- | --- |
-| `MaterialApp` / `CupertinoApp` | `eframe::App` / custom app state | App shell lifecycle and root state |
-| `Widget` | `egui::Ui` + immediate draw commands | UI is emitted as commands, not retained tree |
-| `StatefulWidget` | `App::update` + mutable app state | State lives in the app struct |
-| `BuildContext` | `&mut Context` / `&mut egui::Ui` | Context is passed explicitly |
-| `Column` / `Row` | `ui.horizontal()`, `ui.vertical()` | Layout is composed with helper methods |
-| `Container` | `ui.allocate_ui()` / `ui.horizontal_wrapped()` | Spaces are allocated and shaped dynamically |
-| `Padding` / `Margin` | `ui.add_space()`, `egui::Spacing`, style | Layout decisions are explicit |
-| `Text` | `ui.label()` | Immediate text rendering |
-| `TextField` | `ui.text_edit_singleline()` / `ui.text_edit_multiline()` | Input state owned by app |
-| `Button` | `ui.button()` | Push button returns bool when clicked |
-| `ListView` | `ui.vertical_scroll_auto()` / custom scroll | Lists are rendered as a loop |
-| `FutureBuilder` | `tokio` / `async` + UI polling | Background futures update state |
-| `StreamBuilder` | `egui::Context::request_repaint()` + channel updates | Repaint when external state changes |
-| `Theme` | `egui::Visuals`, `Context::set_visuals()` | Visuals are runtime-configurable |
-| `InheritedWidget` | global app state / `Rc<RefCell<_>>` / `Arc<Mutex<_>>` | Data flows through app state |
-| `Navigator` | custom state machine / screen enum | State-driven navigation |
-| `AnimatedBuilder` / `AnimationController` | `egui::Context::animate()` / `Instant` + custom timers | Animation is explicit and custom |
-| `Provider` / `Bloc` | `AppState`, channels, commands, enums | React to state transitions directly |
-| `LayoutBuilder` | `ui.available_size()` / `ui.max_rect()` | Measure current available area |
-| `GestureDetector` | custom pointer handling in `egui::Response` | Event handling via response objects |
-| `Material` / `Cupertino` design system | `egui` built-in widgets and custom styling | Components are simpler and more raw |
+Flutter and egui share a broad goal: building interactive user interfaces, but they do so with very different execution models.
+
+Flutter is a retained UI framework built around a widget tree, composition, and a render pipeline managed by the framework. The developer describes the UI as a hierarchy of widgets, and the framework decides how and when to rebuild parts of the tree.
+
+egui is an immediate-mode UI library. The developer emits UI commands each frame from the current application state. The UI is not preserved as a widget tree; instead, it is rebuilt from state every frame, and interaction is interpreted from response objects that tell you what happened.
+
+This means the most important translation is not “Widget X becomes egui Widget Y,” but rather:
+
+- Flutter stateful composition becomes app state + update loop
+- Flutter build context becomes runtime UI context + explicit state ownership
+- Flutter callbacks become `Response` values and command logic
+- Flutter widget tree becomes immediate UI generation from current state
+- Flutter layouts become explicit layout methods and region allocation
+- Flutter async streams become channels, state transitions, and repaint triggers
 
 ---
 
-## Core translation model
+## Core mental model differences
 
-### 1. Flutter mindset: widgets are declarative
+### 1. Flutter: retained widget graph
 
-In Flutter, you often write:
+Flutter works by constructing a widget tree and letting the framework reconcile it to the render tree. UI changes happen through rebuilds and state propagation.
 
 ```dart
-Column(
-  children: [
-    Text('Hello'),
-    ElevatedButton(
-      onPressed: () {},
-      child: Text('Click me'),
-    ),
-  ],
-)
-```
+class CounterPage extends StatefulWidget {
+  const CounterPage({super.key});
 
-This is a tree of widget descriptions. The framework re-renders as needed.
-
-### 2. egui mindset: emit UI immediately
-
-In egui, you usually do:
-
-```rust
-impl eframe::App for MyApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.vertical(|ui| {
-                ui.label("Hello");
-                if ui.button("Click me").clicked() {
-                    // handle click
-                }
-            });
-        });
-    }
-}
-```
-
-The mental shift is:
-
-- Flutter: describe the UI as a structure.
-- egui: execute UI code imperatively each frame and react to the returned `Response` objects.
-
----
-
-## Catalog of common translations
-
-### App shell and lifecycle
-
-#### Flutter
-- `MaterialApp`
-- `WidgetsApp`
-- `runApp`
-- `StatefulWidget`
-- `build()`
-
-#### egui
-- `eframe::App`
-- `App::update(ctx, frame)`
-- `egui::CentralPanel`
-- custom state struct
-- state mutation in `update()`
-
-Example:
-
-```rust
-struct MyApp {
-    counter: i32,
-}
-
-impl eframe::App for MyApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if ui.button("+1").clicked() {
-                self.counter += 1;
-            }
-            ui.label(format!("Counter: {}", self.counter));
-        });
-    }
-}
-```
-
-#### Translation
-
-- Flutter app state often lives in widgets.
-- egui app state usually lives in a single app struct or a set of stateful values owned by the app.
-
----
-
-### Layout and composition
-
-#### Flutter
-- `Column`, `Row`, `Stack`, `Center`, `Padding`, `Expanded`, `Flexible`
-- `SizedBox`, `AspectRatio`
-
-#### egui
-- `ui.vertical`, `ui.horizontal`, `ui.allocate_ui`, `ui.scope`, `ui.columns`, `ui.separator`
-- `egui::Rect`, `ui.max_rect`, `ui.available_size`
-- custom layout helpers
-
-```rust
-ui.horizontal(|ui| {
-    ui.label("Name:");
-    ui.add_sized([180.0, 20.0], egui::TextEdit::singleline(&mut self.name));
-});
-```
-
-#### Translation
-
-Flutter layout is built around widget tree composition. egui layout is built via UI closures and sizing operations. You usually think in terms of current available space and emitted components.
-
----
-
-### State management
-
-#### Flutter
-- `setState`
-- `ValueNotifier`
-- `ChangeNotifier`
-- `Provider`
-- `Riverpod`
-- `Bloc`
-
-#### Rust/egui
-- `struct AppState`
-- `Arc<Mutex<_>>` for shared state between threads/tasks
-- `tokio::sync::watch` / `mpsc` for updates from async tasks
-- state enums for screen transitions
-- direct mutation inside `update()`
-
-```rust
-#[derive(Default)]
-struct AppState {
-    items: Vec<String>,
-    input: String,
-}
-```
-
-For asynchronous updates:
-
-```rust
-let (tx, rx) = std::sync::mpsc::channel();
-
-// background task sends updates
-// app receives updates and triggers repaint
-ctx.request_repaint();
-```
-
-#### Translation
-
-Flutter often hides state ownership behind widget lifecycles. egui makes state ownership explicit and local to the app or shared modules.
-
----
-
-### Forms and input
-
-#### Flutter
-- `TextField`
-- `TextFormField`
-- `Form`
-- validation callbacks
-- `FocusNode`
-
-#### egui
-- `TextEdit::singleline`, `TextEdit::multiline`
-- `ui.label`, `ui.checkbox`, `ui.radio_value`, `ui.slider`
-- custom validation logic
-
-```rust
-ui.horizontal(|ui| {
-    ui.label("Email:");
-    ui.text_edit_singleline(&mut self.email);
-});
-
-if ui.button("Submit").clicked() {
-    if self.email.contains('@') {
-        // valid
-    }
-}
-```
-
-#### Translation
-
-In Flutter, form widgets often come with a more framework-managed validation flow. In egui, validation is usually a direct `if` check in application logic.
-
----
-
-### Buttons and interaction
-
-#### Flutter
-- `ElevatedButton`, `TextButton`, `IconButton`, `InkWell`
-- callbacks and `onPressed`
-
-#### egui
-- `ui.button()`, `ui.small_button()`, `ui.add(Button::new(...))`
-- `response.clicked`, `response.hovered`, `response.dragged`
-
-```rust
-if ui.button("Save").clicked() {
-    self.save();
-}
-```
-
-#### Translation
-
-Flutter interactions are mostly declarative callback-driven. egui turns interaction into `Response` objects that let you inspect click, hover, drag, and focus state.
-
----
-
-### Lists and scrolling
-
-#### Flutter
-- `ListView`
-- `GridView`
-- `CustomScrollView`
-
-#### egui
-- `ScrollArea::vertical()`
-- loops with `ui.horizontal_wrapped` or `ui.vertical`
-- custom virtualization if needed
-
-```rust
-egui::ScrollArea::vertical().show(ui, |ui| {
-    for item in &self.items {
-        ui.horizontal(|ui| {
-            ui.label(item);
-            if ui.button("Open").clicked() {
-                // logic
-            }
-        });
-    }
-});
-```
-
-#### Translation
-
-Flutter lists often emphasize widget composition and scroll performance at the framework level. egui leverages simple loops and explicit scroll container composition.
-
----
-
-### Routing and navigation
-
-#### Flutter
-- `Navigator`
-- `MaterialPageRoute`
-- `RouteSettings`
-- `push`, `pop`
-
-#### egui
-- `enum Screen { Home, Settings, About }`
-- state variable or enum-driven UI switch
-- custom modal and panel patterns
-
-```rust
-enum Screen {
-    Home,
-    Settings,
-}
-
-struct App {
-    screen: Screen,
-}
-
-impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        match self.screen {
-            Screen::Home => {
-                // home screen
-            }
-            Screen::Settings => {
-                // settings screen
-            }
-        }
-    }
-}
-```
-
-#### Translation
-
-In Flutter, navigation is part of the framework. In egui, navigation is often represented as app state and feature-specific UI branches.
-
----
-
-### Styling and design systems
-
-#### Flutter
-- `ThemeData`
-- `TextTheme`
-- `ColorScheme`
-- `IconTheme`
-
-#### egui
-- `egui::Visuals`
-- `ui.style_mut()`
-- `egui::FontId`
-- `egui::Color32`
-- custom theme structs
-
-```rust
-let mut style = (*ctx.style()).clone();
-style.spacing.button_padding = egui::vec2(12.0, 6.0);
-ctx.set_style(style);
-```
-
-#### Translation
-
-Flutter has a richer, framework-native theme system. egui themes are lighter but powerful for custom visual identity.
-
----
-
-### Async and background work
-
-#### Flutter
-- `FutureBuilder`
-- `StreamBuilder`
-- `async/await`
-- `Timer`, `Delayed` etc.
-
-#### egui
-- `tokio`, `async-std`, `futures`
-- `mpsc` or `watch` channels
-- call `ctx.request_repaint()` when async state changes
-
-```rust
-let (tx, rx) = std::sync::mpsc::channel();
-
-std::thread::spawn(move || {
-    // work
-    tx.send("done").unwrap();
-});
-```
-
-#### Translation
-
-In Flutter, async UI updates are often coupled to widget lifecycle. In egui, your app state owns the update loop, and async tasks inform the UI when something changes.
-
----
-
-### Animation
-
-#### Flutter
-- `AnimationController`
-- `Tween`
-- `AnimatedBuilder`
-- `Hero`, `Curves`
-
-#### egui
-- custom time-based animation with `Instant`
-- `egui::Context::request_repaint()`
-- interpolation math and redraw loops
-
-```rust
-let elapsed = self.start.elapsed().as_secs_f32();
-let t = (elapsed * 0.5).sin() * 0.5 + 0.5;
-```
-
-#### Translation
-
-Flutter animation is framework-assisted and builder-oriented. egui animation is typically more explicit and hand-rolled with the time domain and repaints.
-
----
-
-### Testing
-
-#### Flutter
-- widget tests
-- integration tests
-- golden tests
-
-#### egui
-- unit tests for logic and state transitions
-- app-state tests
-- integration tests around pure UI logic
-
-#### Translation
-
-Flutter encourages UI testing at the widget layer. egui tends to lean on logic-level tests and custom state-driven validation because the UI is immediate and simpler.
-
----
-
-## A "Flutter-to-egui" cheat sheet
-
-| If you know Flutter... | Think in egui as... |
-| --- | --- |
-| `setState` | mutate app state and repaint |
-| `build()` | `update()` emits UI every frame |
-| `Widget` | list of immediate draw commands |
-| `Scaffold` | `CentralPanel` + menus + side panels |
-| `Container` | `ui.allocate_ui` and spacing |
-| `TextField` | `TextEdit` + local `String` |
-| `ListView` | `ScrollArea` + looped list |
-| `ThemeData` | `Visuals` + style mutations |
-| `FutureBuilder` | `async` task + state channel |
-| `Navigator` | `enum Screen` + state machine |
-| `Form` | custom validation logic in UI flow |
-| `AnimationController` | time-based interpolation and repaint |
-| `Provider` | app state + shared structs |
-
----
-
-## Practical project structure
-
-A Flutter developer working in egui often organizes code like this:
-
-```text
-src/
-  main.rs
-  app.rs
-  state.rs
-  screens/
-    home.rs
-    settings.rs
-  widgets/
-    button_row.rs
-    stats_card.rs
-  models/
-    item.rs
-  theme.rs
-```
-
-This mirrors the transition from widget-centric structure to app-centric structure.
-
----
-
-## Typical translation examples
-
-### Example 1: Flutter counter app
-
-Flutter:
-
-```dart
-class MyHomePage extends StatefulWidget {
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<CounterPage> createState() => _CounterPageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _CounterPageState extends State<CounterPage> {
+  int count = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -489,11 +50,11 @@ class _MyHomePageState extends State<MyHomePage> {
       body: Center(
         child: Column(
           children: [
-            Text('$_counter'),
+            Text('$count'),
             ElevatedButton(
-              onPressed: () => setState(() => _counter++),
-              child: Text('Add'),
-            )
+              onPressed: () => setState(() => count++),
+              child: const Text('Increment'),
+            ),
           ],
         ),
       ),
@@ -502,20 +63,24 @@ class _MyHomePageState extends State<MyHomePage> {
 }
 ```
 
-egui:
+The conceptual model is: widget tree + rebuild + diff + paint.
+
+### 2. egui: immediate UI from current state
+
+egui emits UI each frame by running your code against the current state.
 
 ```rust
-struct MyApp {
-    counter: i32,
+struct CounterApp {
+    count: i32,
 }
 
-impl eframe::App for MyApp {
+impl eframe::App for CounterApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
-                ui.label(self.counter.to_string());
-                if ui.button("Add").clicked() {
-                    self.counter += 1;
+                ui.label(self.count.to_string());
+                if ui.button("Increment").clicked() {
+                    self.count += 1;
                 }
             });
         });
@@ -523,121 +88,908 @@ impl eframe::App for MyApp {
 }
 ```
 
-### Example 2: Flutter form field
+The conceptual model is: state + frame + emit UI + react to response.
+
+---
+
+## Translation matrix: Flutter to Rust/egui
+
+| Flutter / Dart concept | Rust / egui equivalent | Technical translation |
+| --- | --- | --- |
+| `runApp` | `eframe::run_native` / `eframe::App` | Bootstraps the UI loop and application context |
+| `MaterialApp` | `eframe::App` with custom state | Root application shell |
+| `StatefulWidget` | app struct + mutable state | State lives in app instance |
+| `build(BuildContext ctx)` | `App::update(&mut self, ctx, frame)` | UI emitted on each frame |
+| `setState(() => ...)` | mutate fields, then repaint | State mutation triggers redraw |
+| `Widget` | `egui::Ui` closures and widgets | UI is produced by immediate commands |
+| `BuildContext` | `&egui::Context`, `&mut Ui`, `Rect`, `Response` | Context is explicit and local |
+| `Column` / `Row` | `ui.vertical`, `ui.horizontal` | Layout is composed in closures |
+| `Expanded` / `SizedBox` | `ui.allocate_ui`, `ui.add_sized` | Space is allocated explicitly |
+| `Text` | `ui.label`, `ui.heading`, etc. | Immediate text rendering |
+| `TextField` | `ui.text_edit_singleline`, `TextEdit::multiline` | String state bound to input |
+| `Button` | `ui.button`, `Button::new` | Clicked state is returned via `Response` |
+| `Container` | `ui.scope` / layout builder | Regions and spacing are explicit |
+| `Padding` | `ui.add_space`, `style.spacing`, `ui.painter` | Visual spacing is controlled with style/layout |
+| `ListView` | `ScrollArea::vertical` + loop | Scroll container and looped render |
+| `GridView` | `ui.columns`, loops, `ui.allocate_ui` | Column-based layout grid |
+| `Navigator` | `enum Screen` / state machine | Navigation modeled as state transitions |
+| `MaterialPageRoute` | custom screen switch | Screen transitions are app-defined |
+| `ThemeData` | `egui::Visuals` + `Context::set_visuals` | Theme is runtime style configuration |
+| `FutureBuilder` | async task + channel or polling + repaint | UI updates when state changes |
+| `StreamBuilder` | `mpsc`/`watch` + repaint | Values move through channels |
+| `ChangeNotifier` | `Arc<Mutex<T>>`, `watch`, `mpsc` | Shared state propagation |
+| `Provider` / `InheritedWidget` | app state, context-local state struct | Data flow is explicit |
+| `AnimationController` | timer + interpolation + request_repaint | Repaint loop with time-based interpolation |
+| `GestureDetector` | `Response` hover, drag, click, pointer data | Input is directly observable |
+| `Material` components | `egui` widgets + custom styling | Custom components often require explicit wrappers |
+
+---
+
+## App lifecycle and root architecture
+
+### Flutter app lifecycle
+
+Flutter applications typically have:
+
+- application boot
+- widget tree construction
+- stateful rebuilds
+- lifecycle hooks like `initState`, `didChangeDependencies`, `dispose`
+
+### egui app lifecycle
+
+egui applications are more straightforward:
+
+- construct the app state
+- create a type implementing `eframe::App`
+- drive the UI in `update()` every frame
+- use `ctx.request_repaint()` to force redraws when external events happen
+
+```rust
+struct App {
+    counter: i32,
+    message: String,
+}
+
+impl eframe::App for App {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Update loop
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Example App");
+            ui.label("Current state is live on every frame.");
+            ui.separator();
+
+            if ui.button("Increment").clicked() {
+                self.counter += 1;
+                self.message = format!("Counter is now {}", self.counter);
+            }
+
+            ui.text_edit_singleline(&mut self.message);
+            ui.label(format!("Counter: {}", self.counter));
+        });
+
+        // Optional: trigger repaint from external async work
+        // ctx.request_repaint();
+    }
+}
+```
+
+### Translation
+
+In Flutter, widgets are often able to own local state and are recreated as part of the framework lifecycle. In egui, your app owns the state; you mutate it and decide when to repaint. The state is not hidden inside widget lifecycles.
+
+---
+
+## Rendering model and UI generation
+
+### Flutter rendering model
+
+Flutter renders through a tree reconciliation process:
+
+- widgets describe what should be displayed
+- the element tree tracks identity
+- render objects compute layout and painting
+- build tree changes are reconciled to the render object tree
+
+### egui rendering model
+
+egui uses immediate mode:
+
+- each frame calls your UI code
+- widgets are built directly from the current state
+- interaction results (`Response`) are returned immediately
+- the backend produces paint commands from those UI operations
+
+Practically, this means:
+
+```rust
+let response = ui.button("Open settings");
+if response.clicked() {
+    self.show_settings = true;
+}
+```
+
+A Flutter developer usually thinks of a widget as a object with identity. In egui, the important object is the `Response` generated by the operation that just happened.
+
+---
+
+## Layout systems: Flutter vs egui
+
+### Flutter layout primitives
+
+Flutter layout is a rich flexible system based on render box layout, constraints, and composition. Typical constructs:
+
+- `Row`, `Column`
+- `Stack`, `Positioned`
+- `Expanded`, `Flexible`
+- `Align`, `Center`, `SizedBox`
+- `IntrinsicHeight`, `AspectRatio`
+- `Wrap`
+
+### egui layout primitives
+
+egui is simpler but still powerful. It emphasizes region allocation and layout closures.
+
+- `ui.horizontal(|ui| { ... })`
+- `ui.vertical(|ui| { ... })`
+- `ui.columns(count, |uis| { ... })`
+- `ui.allocate_ui(size, |ui| { ... })`
+- `ui.scope(|ui| { ... })`
+- `ui.with_layout(Layout::top_down(Align::LEFT), |ui| { ... })`
+
+Example:
+
+```rust
+ui.horizontal(|ui| {
+    ui.label("Name:");
+    ui.add_sized([180.0, 22.0], egui::TextEdit::singleline(&mut self.name));
+    if ui.button("Save").clicked() {
+        self.save_name();
+    }
+});
+```
+
+### Important translation
+
+Flutter layout is constraint-based and inherited. egui layout is immediate and region-based. In Flutter, a child receives constraints and decides what size to take. In egui, the parent allocates a region, and the child uses what it needs within that area.
+
+---
+
+## State management translation
+
+### Flutter state patterns
+
+Flutter has a wide range of patterns:
+
+- `setState`
+- `InheritedWidget`
+- `Provider`
+- `Riverpod`
+- `Bloc`
+- `Redux`
+- `ChangeNotifier`
+
+### egui state patterns
+
+Rust/egui usually relies on:
+
+- app struct fields
+- enums for screens, modes, and substates
+- shared state via `Arc<Mutex<T>>` or `Arc<RwLock<T>>`
+- `tokio::sync::watch` or `mpsc` for async updates
+- event-driven commands and actions
+
+Example with central app state:
+
+```rust
+struct AppState {
+    input: String,
+    selected_tab: Tab,
+    dirty: bool,
+}
+
+enum Tab {
+    Overview,
+    Details,
+    Settings,
+}
+```
+
+Then use it inside `update()`.
+
+```rust
+impl eframe::App for AppState {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::TopBottomPanel::top("topbar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.selectable_label(self.selected_tab == Tab::Overview, "Overview").clicked() {
+                    self.selected_tab = Tab::Overview;
+                }
+                if ui.selectable_label(self.selected_tab == Tab::Details, "Details").clicked() {
+                    self.selected_tab = Tab::Details;
+                }
+            });
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            match self.selected_tab {
+                Tab::Overview => {
+                    ui.label("Overview panel");
+                }
+                Tab::Details => {
+                    ui.label("Details panel");
+                }
+                Tab::Settings => {
+                    ui.label("Settings panel");
+                }
+            }
+        });
+    }
+}
+```
+
+### Translation rules
+
+- `StatefulWidget` -> app state struct
+- `setState` -> mutate state in `update()`
+- `Provider` -> shared state or app-scoped state container
+- `InheritedWidget` -> explicit state passed around or stored in app root
+- `StreamBuilder` -> channels or polling loop + repaint
+
+---
+
+## Interaction model: callbacks and responses
+
+### Flutter
+
+Flutter interaction is usually callback-based.
+
+```dart
+TextButton(
+  onPressed: () {
+    doThing();
+  },
+  child: const Text('Do thing'),
+)
+```
+
+### egui
+
+egui returns a `Response` object for each widget call.
+
+```rust
+let response = ui.button("Do thing");
+if response.clicked() {
+    do_thing();
+}
+```
+
+This is important because the event model is not built around an implicit callback system. Instead, the UI interaction is encoded in the returned object.
+
+You can inspect many properties:
+
+- `clicked()`
+- `double_clicked()`
+- `hovered()`
+- `dragged()`
+- `context_menu()`
+- `contains_pointer()`
+- `is_pointer_button_down_on()`
+
+This enables precise, imperative logic:
+
+```rust
+let response = ui.add(egui::Button::new("Launch"));
+if response.clicked() {
+    self.launch_action();
+}
+
+if response.hovered() {
+    ui.ctx().output(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
+}
+```
+
+---
+
+## Input handling and focus
+
+### Flutter input
+
+Flutter input is strongly integrated with widget tree focus management, keyboard handling, text editing, and gesture arenas.
+
+### egui input
+
+egui gets input from the OS and exposes it through `egui::Context` and `ui` calls. The library handles input events and gives you responses.
+
+Examples:
+
+```rust
+ui.text_edit_singleline(&mut self.search_text);
+
+if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+    self.submit_search();
+}
+```
+
+You can also inspect input state:
+
+```rust
+if ui.input(|i| i.modifiers.shift) {
+    // shift key active
+}
+```
+
+### Translation
+
+Flutter developers often expect a focus tree and widget-level focus management. In egui, focus and input are evaluated using the current input state and response objects rather than a focus node hierarchy.
+
+---
+
+## Data and model architecture
+
+### Flutter architecture patterns
+
+Common patterns include:
+
+- widget-local state
+- repository/service layer
+- bloc / cubit
+- riverpod providers
+- domain-driven model separation
+
+### Rust/egui architecture patterns
+
+Typical Rust patterns are closer to:
+
+- `AppState` for runtime state
+- domain structs and models
+- services or commands with separation of responsibilities
+- `Arc<Mutex<_>>` for shared state
+- `enum` for app workflow and screens
+
+Example structure:
+
+```text
+src/
+  main.rs
+  app.rs
+  state.rs
+  models.rs
+  services/
+    data_service.rs
+    history_service.rs
+  screens/
+    dashboard.rs
+    editor.rs
+    settings.rs
+```
+
+### Translation
+
+Flutter architecture often emphasizes widget composition and dependency injection. Rust architecture is often more explicit about ownership and message flow. That means your app state should be designed around clear ownership boundaries rather than simply attaching everything to widgets.
+
+---
+
+## Async and concurrency model
+
+### Flutter async
+
+Flutter uses async/await and streams extensively. Common patterns:
+
+- `FutureBuilder`
+- `StreamBuilder`
+- async REST calls
+- scheduled tasks
+- timers
+
+### egui async
+
+Rust has a more explicit concurrency model. You often use:
+
+- `std::thread`
+- `tokio` tasks
+- `async` functions
+- `mpsc` / `watch` channels
+- `Arc<Mutex<T>>`
+
+```rust
+use std::sync::mpsc;
+
+let (tx, rx) = mpsc::channel();
+
+std::thread::spawn(move || {
+    let result = fetch_data();
+    tx.send(result).unwrap();
+});
+
+// In app update loop
+if let Ok(data) = rx.try_recv() {
+    self.data = data;
+    ctx.request_repaint();
+}
+```
+
+### Important note
+
+A Flutter app often has a relatively friendly UI main thread model. In Rust, UI work is still on the UI thread, while long-running work often occurs in background threads or async tasks. State updates need to be synchronized and then paired with `ctx.request_repaint()` when data is ready.
+
+---
+
+## The event loop and redraw strategy
+
+### Flutter rebuild model
+
+Flutter decides when to rebuild based on state changes and widget identity.
+
+### egui redraw model
+
+egui is simpler: the frame function runs repeatedly, and your app decides when to repaint.
+
+```rust
+if self.needs_refresh {
+    ctx.request_repaint();
+}
+```
+
+This should be seen as a direct translation of app-level update signals. If a background task completes, that task should notify the app and then request a repaint.
+
+Very often the pattern is:
+
+1. async task completes
+2. channel receives message
+3. app mutates state
+4. `ctx.request_repaint()` is called
+5. next frame draws updated UI
+
+---
+
+## Widgets and custom component patterns
+
+### Flutter custom widgets
+
+Flutter developers often encapsulate reusable UI in custom widget classes:
+
+```dart
+class ProfileCard extends StatelessWidget {
+  final String name;
+
+  const ProfileCard({super.key, required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(name),
+      ),
+    );
+  }
+}
+```
+
+### egui custom widgets
+
+In egui, reuse usually happens through helper functions or component-like structs.
+
+```rust
+fn profile_card(ui: &mut egui::Ui, name: &str) {
+    ui.group(|ui| {
+        ui.horizontal(|ui| {
+            ui.label("User:");
+            ui.strong(name);
+        });
+    });
+}
+```
+
+Or as a method on an app state:
+
+```rust
+impl App {
+    fn profile_card(&mut self, ui: &mut egui::Ui) {
+        ui.group(|ui| {
+            ui.label("Profile");
+            ui.horizontal(|ui| {
+                ui.label("Name:");
+                ui.text_edit_singleline(&mut self.name);
+            });
+        });
+    }
+}
+```
+
+### Translation
+
+Flutter custom widget classes are often replaced by Rust functions, closure-based UI helpers, or small UI component structs.
+
+---
+
+## Navigation and screen flow
+
+### Flutter navigation model
+
+Flutter navigation is built around routes and the navigator stack.
+
+```dart
+Navigator.push(
+  context,
+  MaterialPageRoute(builder: (_) => const SettingsPage()),
+);
+```
+
+### egui navigation model
+
+In egui, navigation is usually represented as app state or an enum-driven view stack.
+
+```rust
+enum Screen {
+    Home,
+    Settings,
+    Editor,
+}
+
+struct App {
+    current_screen: Screen,
+}
+
+impl eframe::App for App {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        match self.current_screen {
+            Screen::Home => {
+                // draw home
+            }
+            Screen::Settings => {
+                // draw settings
+            }
+            Screen::Editor => {
+                // draw editor
+            }
+        }
+    }
+}
+```
+
+If you need a stack, you can model it explicitly:
+
+```rust
+struct App {
+    screens: Vec<Screen>,
+}
+```
+
+### Translation
+
+In Flutter, route transitions are framework-supported and stack-based. In egui, navigation is usually encoded directly as application state and view selection, which is often more explicit and less magic.
+
+---
+
+## Design system and visual styling
+
+### Flutter styling model
+
+Flutter styling is largely theme and widget-based:
+
+- `ThemeData`
+- `TextTheme`
+- `ColorScheme`
+- `Card`, `AppBar`, `ElevatedButton`
+- inherited theme data
+
+### egui styling model
+
+egui uses a more direct visual configuration model:
+
+- `egui::Visuals`
+- `ui.style_mut()`
+- `FontId`
+- `Color32`
+- custom widget wrappers and style overrides
+
+```rust
+let mut style = (*ctx.style()).clone();
+style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+style.visuals.extreme_bg_color = egui::Color32::from_rgb(18, 18, 18);
+ctx.set_style(style);
+```
+
+### Translation
+
+Flutter developers often rely on a comprehensive design system. egui gives you a smaller built-in styling surface but exposes enough configuration to build your own visual language.
+
+---
+
+## Testing mental model
+
+### Flutter testing
+
+Flutter encourages widget testing and golden tests: rendering and interaction are tested at the hierarchy level.
+
+### egui testing
+
+A Rust/egui app is more naturally tested with:
+
+- unit tests for business logic and state transitions
+- app logic tests for data transformations and screen transitions
+- integration tests around state update logic
+- UI tests when needed, but usually less framework-driven
+
+Example:
+
+```rust
+#[test]
+fn increment_updates_count() {
+    let mut app = App { count: 0 };
+    app.increment();
+    assert_eq!(app.count, 1);
+}
+```
+
+### Translation
+
+Flutter testing is often centered around widget behavior. Rust/egui testing is often centered on data and app logic because the UI is generated immedately from state.
+
+---
+
+## Common Flutter patterns and their egui equivalents
+
+### 1. `setState` -> mutate state and repaint
 
 Flutter:
 
 ```dart
-TextField(
-  decoration: InputDecoration(labelText: 'Name'),
-  onChanged: (value) => name = value,
+setState(() => counter++);
+```
+
+egui:
+
+```rust
+self.counter += 1;
+ctx.request_repaint();
+```
+
+---
+
+### 2. `StatefulWidget` -> app root or screen state
+
+Flutter:
+
+```dart
+class SearchPage extends StatefulWidget {
+  // stateful UI
+}
+```
+
+egui:
+
+```rust
+struct SearchPageState {
+    query: String,
+    result: Vec<Item>,
+}
+```
+
+---
+
+### 3. `FutureBuilder` -> async task + channel notifications
+
+Flutter:
+
+```dart
+FutureBuilder(
+  future: loadData(),
+  builder: (context, snapshot) => Text(snapshot.data ?? 'Loading'),
 )
 ```
 
 egui:
 
 ```rust
-ui.label("Name");
-ui.text_edit_singleline(&mut self.name);
+// spawn task
+// send result via channel
+// in update(): if message received, update state and repaint
 ```
 
 ---
 
-## Design philosophy comparison
+### 4. `ListView` -> `ScrollArea` + loop
+
+Flutter:
+
+```dart
+ListView.builder(
+  itemCount: items.length,
+  itemBuilder: (context, index) => Text(items[index]),
+)
+```
+
+egui:
+
+```rust
+egui::ScrollArea::vertical().show(ui, |ui| {
+    for item in &self.items {
+        ui.label(item);
+    }
+});
+```
+
+---
+
+### 5. `TextField` -> `TextEdit`
+
+Flutter:
+
+```dart
+TextField(controller: controller)
+```
+
+egui:
+
+```rust
+ui.text_edit_singleline(&mut self.controller_value);
+```
+
+---
+
+### 6. `ThemeData` -> `Visuals` + style mutations
+
+Flutter:
+
+```dart
+ThemeData.dark();
+```
+
+egui:
+
+```rust
+let mut visuals = egui::Visuals::dark();
+ctx.set_visuals(visuals);
+```
+
+---
+
+### 7. `Navigator` -> enum screen state
+
+Flutter:
+
+```dart
+Navigator.push(context, route);
+```
+
+egui:
+
+```rust
+self.screen = Screen::Settings;
+```
+
+---
+
+## High-level design guidance
+
+### When a Flutter developer should think in egui terms:
+
+- state ownership is explicit and central
+- rendering is generated each frame from state
+- event handling is response-based
+- UI can be kept lightweight and compositional
+- background work is isolated from UI logic
+
+### When a Rust/egui app should mirror Flutter patterns:
+
+- you want a maintainable screen structure
+- you want to keep a clear separation between UI state and domain state
+- you want to reuse components and keep a modular app shell
+- you want a strong conceptual bridge from Flutter to Rust
+
+---
+
+## Best-practice translation checklist
+
+If you're translating a Flutter app into egui, ask these questions:
+
+- Where is the state actually owned?
+- What is the root app state?
+- Which code is UI generation and which is domain logic?
+- What should trigger repaint?
+- Are async updates flowing through channels or shared state?
+- Is this a screen state, a modal state, or a shared app state?
+- Which values are local to a single panel vs global to the app?
+- Are we thinking in retained widget structure or state-driven UI?
+
+---
+
+## Trade-offs and practical realities
 
 ### Flutter strengths
-- polished material design ecosystem
-- rich widget library and tree composition
-- strong developer ergonomics for app UI
-- mature reactive patterns
+
+- mature widget ecosystem
+- strong material design integration
+- dependable build and hot reload workflow
+- excellent for mobile-first app UIs and rich UI hierarchies
 
 ### egui strengths
-- low overhead and fast UI development
+
+- lean and immediate rendering pipeline
 - Rust-native safety and performance
-- immediate mode simplicity
-- excellent for desktop and tool-like interfaces
+- very strong for desktop, tools, editors, diagnostics, control surfaces
+- simpler mental model for stateful UI once you learn it
 
-### Best-fit translations
+### When not to expect direct equivalence
 
-- Flutter dashboards -> egui panels and data-heavy desktop UI
-- Flutter forms -> egui input editors with custom validation
-- Flutter mobile prototypes -> egui desktop or cross-platform UIs
-- Flutter app state patterns -> Rust app state and async message loops
+Some Flutter concepts are deeply tied to the framework runtime and do not map 1:1 to egui:
 
----
+- inherited widget trees
+- framework-level route builders
+- rich material semantics and widget-specific behaviors
+- automatic reconciliation over large widget trees
 
-## Common pitfalls for Flutter developers switching to egui
-
-1. Expecting a retained widget tree
-   - egui does not keep a widget tree in the same way.
-
-2. Re-rendering everything manually
-   - In egui, you usually re-run the UI code each frame; state drives the result.
-
-3. Treating callbacks like Flutter-style widget callbacks only
-   - In egui, the response object is the direct interaction signal.
-
-4. Ignoring app ownership and state flow
-   - In Rust, data ownership and mutation boundaries matter.
-
-5. Overusing global state
-   - Keep state explicit and close to the app logic.
+Instead, the correct translation is to model the same behavior with explicit application state, view selection, and imperative UI generation.
 
 ---
 
-## Recommended mental model
+## Recommended developer mindset
 
-Think of it like this:
+The most useful way to translate Flutter into egui is:
 
-- Flutter: a declarative UI model with a retained widget graph.
-- egui: a state-driven immediate UI loop where you emit widgets from current state.
+- Stop thinking: “What widget tree should I build?”
+- Start thinking: “What state does my app need, and how should the UI be emitted from it each frame?”
 
-The art is not copying Flutter exactly. The art is understanding the shape of your app logic and re-expressing it in the idioms that fit Rust + egui.
+This shift is the heart of the translation.
 
 ---
 
-## Quick reference
+## One-page cheat sheet
 
 ```text
-Flutter concept -> Rust/egui concept
-------------------------------------
-StatefulWidget  -> app struct + update loop
-BuildContext    -> UI context / mutable state access
-Widget tree     -> instant UI emission each frame
-setState        -> mutate state and trigger repaint
-ThemeData       -> Visuals and style tweaks
-FutureBuilder   -> async tasks + message channel
-Navigator       -> enum-screen app state
-ListView        -> ScrollArea + loop
-Button          -> ui.button() + Response
-TextField       -> TextEdit + String state
-Layout          -> ui.horizontal(), vertical(), allocate_ui()
+Flutter concept                | Rust/egui equivalent
+-----------------------------|-------------------------------
+StatefulWidget                | App struct + state fields
+BuildContext                  | Ui context / explicit state access
+setState                     | mutate state + repaint
+Widget tree                  | immediate UI build each frame
+Layout constraints           | allocate_ui and layout closures
+Row / Column                 | ui.horizontal / ui.vertical
+ListView                     | ScrollArea + loop
+TextField                    | TextEdit + String state
+Button                       | ui.button() + Response
+Navigator                    | enum Screen + app state
+ThemeData                    | Visuals + style mutations
+FutureBuilder/StreamBuilder  | async task + channel + repaint
+Provider/InheritedWidget     | app-level state container
+GestureDetector             | Response hover/click/drag checks
 ```
 
 ---
 
 ## Final takeaway
 
-Flutter developers already understand app composition, layout, hierarchy, state, and event-driven interactions. Those skills translate well to egui once you shift from "widget tree thinking" to "state + immediate UI loop thinking".
+Flutter and egui are not equivalent in implementation model, but they are equivalent in intent: both provide a mechanism for expressing interactive UI, responding to user input, and mapping state to visible output.
 
-This is not a replacement for Flutter. It is a translation layer: a map from your existing design instincts to the Rust and egui ecosystem.
+Flutter developers already understand the essential problems: composition, layout, state, interaction, data flow, and reactivity. Those concepts transfer to egui through a different model:
+
+- app state is explicit
+- the UI is emitted from that state
+- input is captured via responses
+- redraws are scheduled intentionally
+- asynchronous work is integrated through channels and repaint signals
+
+That is the real technical translation from Dart/Flutter expertise to Rust/egui.
 
 ---
 
-## Contributing
+## Suggested next steps
 
-Add comparisons, code snippets, and examples here as this catalog grows.
+Use this catalog as a bridge while building a small project in Rust/egui, such as:
 
-Suggested additions:
-- Material widgets -> egui equivalents
-- navigation patterns
-- data table patterns
-- form validation patterns
-- async state synchronization
-- cross-platform patterns
+- a counter app
+- a settings panel
+- a list/search dashboard
+- a small editor or data viewer
+- a form-heavy tool with validation and async load
+
+The fastest way to become fluent in egui is to implement a few Flutter-like patterns in Rust and compare the behavior directly.
 
 ---
 
 ## License
 
-This project is intended as a conceptual learning catalog. Use it as a practical reference and extension point for your own Rust/egui work.
+This repository is intended as a learning and translation reference for developers moving from Dart/Flutter to Rust/egui.
