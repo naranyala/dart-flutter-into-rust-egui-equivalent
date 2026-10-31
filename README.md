@@ -681,8 +681,8 @@ egui uses a more direct visual configuration model:
 
 - `egui::Visuals`
 - `ui.style_mut()`
-- `FontId`
-- `Color32`
+- `egui::FontId`
+- `egui::Color32`
 - custom widget wrappers and style overrides
 
 ```rust
@@ -973,6 +973,113 @@ Flutter developers already understand the essential problems: composition, layou
 - asynchronous work is integrated through channels and repaint signals
 
 That is the real technical translation from Dart/Flutter expertise to Rust/egui.
+
+---
+
+## Future direction: Flutter-like abstraction over egui
+
+A compelling next step is not to replace egui, but to create a Flutter-shaped abstraction layer that preserves familiar developer ergonomics while remaining grounded in Rust's ownership model and egui's immediate-mode runtime.
+
+The central design idea is simple:
+
+- keep raw egui for rendering, input, and painting
+- build a Flutter-like surface on top of it for ergonomics and API familiarity
+- treat the “widget tree” as a high-level DSL or builder API, not as a literal retained runtime tree
+
+This would result in a library that feels like a Flutter-compatible ecosystem, but internally executes through immediate-mode UI generation.
+
+### Why this is a strong direction
+
+This abstraction aims to satisfy several goals at once:
+
+- mimic a Flutter-like developer experience for app composition
+- preserve Rust's explicit state ownership and thread-safety model
+- keep immediate-mode efficiency and simplicity from egui
+- reduce the conceptual leap for Flutter developers entering Rust UI development
+
+### Core abstraction model
+
+The library would likely be structured in layers:
+
+1. Raw egui runtime
+   - `Context`, `Ui`, `Response`, `Rect`, painting, input state, style system, timers, repaint loop
+
+2. Flutter-like framework layer
+   - `App`, `MaterialApp`, `Scaffold`, `Column`, `Row`, `Text`, `Button`, `StatefulWidget`, `State<T>`, `BuildContext`
+
+3. Runtime/state engine
+   - widget registry, state lifecycle, navigation stack, async updates, repaint scheduling
+
+4. Ecosystem helpers
+   - theming, navigation, dialogs, forms, data tables, custom components, async builders, gestures
+
+### The key architectural principle
+
+The abstracted framework should mimic the API shape and semantics of Flutter, but not its internal retained widget architecture.
+
+In other words:
+
+- Flutter interface: familiar and declarative
+- egui backend: immediate-mode, fast, efficient, explicit
+- Rust runtime: ownership-safe, stateful, compositional
+
+This yields a hybrid architecture that feels familiar without sacrificing the actual strengths of Rust and egui.
+
+### A representative conceptual API
+
+```rust
+struct MyApp {
+    counter: i32,
+}
+
+impl App for MyApp {
+    fn build(&mut self, ctx: &mut BuildContext) {
+        MaterialApp::new()
+            .theme(Theme::dark())
+            .home(
+                Scaffold::new()
+                    .body(
+                        Column::new()
+                            .padding(16.0)
+                            .children([
+                                Text::new("Hello from Rust/egui"),
+                                SizedBox::height(12.0),
+                                Button::new("Increment")
+                                    .on_click(|app| app.counter += 1),
+                                Text::new(format!("Count: {}", app.counter)),
+                            ]),
+                    ),
+            )
+            .build(ctx);
+    }
+}
+```
+
+This is the intended user-facing ergonomics: a Flutter-like UI DSL, but still real-time, immediate-mode, and Rust-native under the hood.
+
+### Core building blocks for the abstraction
+
+- `App` and application lifecycle
+- `BuildContext` as a lightweight runtime context object
+- `Widget` trait for UI elements
+- `State<T>` for stateful widgets and mutable data
+- `Navigator` / route stack for screen management
+- `Theme` system for colors, typography, spacing, and visual style
+- `FutureBuilder` / `StreamBuilder` analogs for async UI updates
+- `Response`-based event handling mapped from egui input
+
+### Why this matters for developers
+
+For a Dart/Flutter developer, this abstraction provides a bridge rather than a complete rewrite. The mental model remains familiar:
+
+- app lifecycle and composition
+- stateful widgets and local state
+- layouts and containers
+- navigation and routes
+- callbacks and user interactions
+- theme and styling
+
+At the same time, the implementation stays true to Rust safety and immediate-mode UI rendering.
 
 ---
 
