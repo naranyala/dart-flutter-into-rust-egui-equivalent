@@ -12,6 +12,37 @@ The goal is to help Dart/Flutter developers map their existing mental model onto
 
 ---
 
+## 0. Scope and contents
+
+Documented against **egui / eframe 0.37** (October 2026). Both crates are pre-1.0, and APIs shift between minor releases; where a recent version change touches a concept here, the catalog calls it out (see section 14).
+
+This is a conceptual catalog, not a drop-in compatibility layer. Code snippets are intentionally small and may omit imports, crate features, error handling, and application-specific policy. For production code, pin compatible `egui`, `eframe`, and ecosystem-crate versions together and verify examples against the version in `Cargo.lock`. The API notes here were checked against the 0.37 documentation and release notes on 2026-11-02.
+
+The examples use native `eframe` unless they explicitly discuss web or mobile. `egui` is the UI library; `eframe` is one integration/runtime that supplies a native or web application shell. Other integrations can have different lifecycle, rendering, persistence, and platform behavior.
+
+Primary version references: [egui 0.37 release notes](https://github.com/emilk/egui/releases/tag/0.37.0), [`eframe::App`](https://docs.rs/eframe/0.37.0/eframe/trait.App.html), [`eframe::run_native`](https://docs.rs/eframe/0.37.0/eframe/fn.run_native.html), and [`egui_kittest`](https://docs.rs/egui_kittest/0.37.0/egui_kittest/). These links are starting points for checking details that may change after this catalog's version target.
+
+**Contents**
+
+1. Executive summary
+2. The core mental model difference
+3. Cross-language edge-case translation map
+4. High-confidence translation matrix
+5. App lifecycle and state translation
+6. Widget-to-UI mapping catalog
+7. Pattern translations that matter in practice
+8. State architecture patterns in real applications
+9. Designing a Dart/Flutter-like abstraction over egui
+10. Bootstrapping a real eframe app
+11. Testing egui apps (kittest)
+12. Where egui apps can run
+13. The egui ecosystem and its pub.dev parallels
+14. egui 0.35–0.37 changes that touch this catalog
+15. Final takeaway
+16. License
+
+---
+
 ## 1. Executive summary
 
 Dart/Flutter and Rust/egui serve the same high-level purpose: interactive UI generation. They do this through different runtime models.
@@ -92,7 +123,8 @@ struct CounterApp {
 }
 
 impl eframe::App for CounterApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.label(self.count.to_string());
@@ -135,10 +167,10 @@ The basic translation works, but real-world UI bugs usually show up in edge case
 
 #### Rust/egui edge cases
 
-- No retained widget tree: state is not automatically reattached to widgets, so identity must be managed deliberately via data and `egui::Id`.
+- No retained widget tree: egui regenerates widget output every frame, while selected interaction state—such as text editing, focus, scroll positions, and open menus—is retained in egui memory and keyed by IDs. Application state still has to be owned and updated explicitly.
 - `egui::Id` collisions: reused IDs across panels or screens can cause stale widget state and unexpectedly shared controls.
 - Input consumption timing: a `Response` is meaningful only for the current frame; reusing it later is a common source of stale-UI logic bugs.
-- Repaint scheduling: if the app mutates state without `ctx.request_repaint()`, the UI may look frozen until another event causes a refresh.
+- Repaint scheduling: if the app mutates state without `ctx.request_repaint()`, the UI may look frozen until another event causes a refresh. Use `request_repaint()` for immediate invalidation, and `request_repaint_after(Duration)` for throttled or animation-style loops.
 - Layout without a fixed widget tree: overflow, clipping, and scrolling are usually solved by explicit `ScrollArea`, `allocate_ui`, or custom layout helpers.
 - Async ownership: channels, watchers, and worker threads must be carefully integrated with the frame loop, or tasks may update state after the UI has moved on.
 - Borrowing inside the UI closure: the immediate-mode model is ergonomic, but Rust borrowing rules can feel stricter when a closure mutates state while also reading it for rendering.
@@ -202,7 +234,7 @@ The bridge between the two worlds is not “same API, different syntax.” It is
 | `runApp` | `eframe::run_native` | Bootstraps the UI program |
 | `MaterialApp` | root `eframe::App` | App shell |
 | `StatefulWidget` | app struct / screen state | Explicit state ownership |
-| `build()` | `App::update()` | UI generation each frame |
+| `build()` | `App::ui()` | UI generation each frame |
 | `setState` | mutate field + repaint | Frame-driven re-render |
 | `BuildContext` | `&egui::Context`, `&mut Ui` | Explicit render context |
 | `Widget` | immediate UI commands | Not an identity-retaining tree |
@@ -213,7 +245,7 @@ The bridge between the two worlds is not “same API, different syntax.” It is
 | `TextField` | `ui.text_edit_singleline()` | Bound to `String` |
 | `Button` | `ui.button()` | `Response.clicked()` |
 | `ListView` | `ScrollArea::vertical()` | Scroll container + loop |
-| `GridView` | `ui.columns()` / loops | Manual grid composition |
+| `GridView` | `egui::Grid` or manual loops | Explicit grid composition |
 | `Expanded` / `Flexible` | allocation and layout constraints | `ui.allocate_ui()` / sizing |
 | `Container` | `ui.scope()` or custom helper | Region-based rendering |
 | `FutureBuilder` | async task + channel + repaint | Message-driven state |
@@ -226,7 +258,7 @@ The bridge between the two worlds is not “same API, different syntax.” It is
 | `GestureDetector` | `Response` hover/drag/click | Direct input handling |
 | `AlertDialog` | modal UI state or custom overlay | App state-driven modal |
 | `Form` | validation in app state | Immediate UI validation |
-| `DataTable` | custom table row loop | Rendered from data state |
+| `DataTable` | `egui_extras::TableBuilder` or a manual row loop | Rendered from data state |
 | `ListTile` | `ui.horizontal()` + labels/actions | Manual row composition |
 | `Card` | `ui.group()` / custom card helper | Composed UI container |
 
@@ -255,7 +287,8 @@ struct MyApp {
 }
 
 impl eframe::App for MyApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading(&self.title);
             ui.checkbox(&mut self.is_expanded, "Expanded");
@@ -285,8 +318,8 @@ The translation is straightforward:
 | Dart/Flutter | egui equivalent |
 | --- | --- |
 | `Text` | `ui.label()` |
-| `RichText` | custom label with formatting or `egui::TextFormat` |
-| `Icon` | custom font icon or label glyph |
+| `RichText` | `egui::RichText` — styled text (`ui.label(RichText::new("x").strong())`) |
+| `Icon` | icon font (`egui_phosphor`) or label glyph; egui 0.37+ renders system glyphs, including colored emoji |
 | `Container` | `ui.group()` or custom helper |
 | `SizedBox` | `ui.add_sized([w, h], ...)` |
 | `Padding` | `ui.add_space()`, spacing groups |
@@ -321,7 +354,7 @@ The translation is straightforward:
 | `Row` | `ui.horizontal()` |
 | `Stack` | overlay using rect/painter |
 | `ListView` | `ScrollArea::vertical()` |
-| `GridView` | loop + row/column layout |
+| `GridView` | `egui::Grid` or loop + row/column layout |
 | `PageView` | stateful page index |
 | `Flow` | `ui.horizontal_wrapped()` |
 | `CustomScrollView` | scroll area with grouped sections |
@@ -335,7 +368,7 @@ The translation is straightforward:
 | `AppBar` | top toolbar panel |
 | `Drawer` | side panel or modal overlay |
 | `BottomNavigationBar` | bottom panel with buttons |
-| `TabBar` | tabs by state |
+| `TabBar` | state enum + a button row (no built-in tab widget; `egui_dock` for IDE-style panels) |
 | `Navigator` | route enum / screen state |
 | `AlertDialog` | custom modal window |
 | `SnackBar` | toast state overlay |
@@ -347,7 +380,7 @@ The translation is straightforward:
 | --- | --- |
 | `Card` | `ui.group()` / custom card helper |
 | `ListTile` | horizontal row with label + actions |
-| `DataTable` | custom rows in a `ScrollArea` |
+| `DataTable` | `egui_extras::TableBuilder` or manual rows in a `ScrollArea` |
 | `Table` | manual row/column rendering |
 | `Chip` | custom label/button |
 | `Badge` | custom colored label |
@@ -384,7 +417,14 @@ struct App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if ui.button("Delete").clicked() {
+                self.modal = ModalState::ConfirmDelete;
+            }
+        });
+
         if matches!(self.modal, ModalState::ConfirmDelete) {
             egui::Window::new("Delete?")
                 .collapsible(false)
@@ -394,18 +434,14 @@ impl eframe::App for App {
                         if ui.button("Cancel").clicked() {
                             self.modal = ModalState::None;
                         }
-                        if ui.button("Delete").clicked() {
+                        if ui.button("Delete item").clicked() {
+                            // The real delete action belongs here.
+                            // Closing the dialog is not the action.
                             self.modal = ModalState::None;
                         }
                     });
                 });
         }
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if ui.button("Delete").clicked() {
-                self.modal = ModalState::ConfirmDelete;
-            }
-        });
     }
 }
 ```
@@ -414,6 +450,7 @@ Translation:
 
 - `showDialog` -> modal state + `egui::Window`
 - dialog actions -> click handlers that mutate state
+- and one honest caveat: `egui::Window` is **not** modal by itself. The panel behind it stays interactive while the window is open. A true modal barrier (blocking the rest of the UI, closing on Escape) is app-level logic in egui, whereas Flutter's `showDialog` provides it for you.
 
 ### 7.2 Forms and validation
 
@@ -439,7 +476,8 @@ impl FormState {
 }
 
 impl eframe::App for FormState {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.label("Create profile");
             ui.text_edit_singleline(&mut self.name);
@@ -460,7 +498,7 @@ impl eframe::App for FormState {
 
 ### 7.3 Data tables
 
-Flutter uses `DataTable` for structured records. In egui, the equivalent is usually a manual row loop with a scroll area.
+Flutter uses `DataTable` for structured records. The nearest egui equivalent is `egui_extras::TableBuilder`, which provides column resizing, striped rows, and large-list scrolling without hand-rolled layout. A manual row loop in a scroll area remains the fallback when full layout control is needed.
 
 ```dart
 DataTable(
@@ -474,6 +512,48 @@ DataTable(
 );
 ```
 
+The direct translation:
+
+```rust
+use egui_extras::{Column, TableBuilder};
+
+struct RowData {
+    name: String,
+    score: i32,
+}
+
+struct TableState {
+    rows: Vec<RowData>,
+}
+
+impl eframe::App for TableState {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        egui::CentralPanel::default().show(ctx, |ui| {
+            TableBuilder::new(ui)
+                .striped(true)
+                .resizable(true)
+                .column(Column::auto().resizable(true))
+                .column(Column::remainder())
+                .header(20.0, |mut header| {
+                    header.col(|ui| ui.strong("Name"));
+                    header.col(|ui| ui.strong("Score"));
+                })
+                .body(|mut body| {
+                    for item in &self.rows {
+                        body.row(18.0, |mut row| {
+                            row.col(|ui| ui.label(&item.name));
+                            row.col(|ui| ui.label(item.score.to_string()));
+                        });
+                    }
+                });
+        });
+    }
+}
+```
+
+The manual fallback, when full layout control is needed:
+
 ```rust
 struct RowData {
     name: String,
@@ -485,7 +565,8 @@ struct TableState {
 }
 
 impl eframe::App for TableState {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::both().show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -521,20 +602,27 @@ struct AsyncState {
 }
 
 impl AsyncState {
-    fn request_update(&mut self) {
+    fn request_update(&mut self, ctx: &egui::Context) {
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
         self.loading = true;
 
+        // Clone the context into the worker so it can wake up the UI when the
+        // result arrives. Without this repaint request, the finished load
+        // would sit invisible until the next user input starts a new frame.
+        let ctx = ctx.clone();
         std::thread::spawn(move || {
             let payload = "Loaded".to_string();
-            tx.send(payload).unwrap();
+            if tx.send(payload).is_ok() {
+                ctx.request_repaint();
+            }
         });
     }
 }
 
 impl eframe::App for AsyncState {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         if let Some(rx) = &self.rx {
             if let Ok(value) = rx.try_recv() {
                 self.status = value;
@@ -552,14 +640,19 @@ impl eframe::App for AsyncState {
             }
 
             if ui.button("Load").clicked() {
-                self.request_update();
+                self.request_update(ctx);
             }
         });
     }
 }
 ```
 
-This is roughly the same design intention as a Flutter `FutureBuilder`, but expressed with explicit Rust state and runtime control.
+This is roughly the same design intention as a Flutter `FutureBuilder`, but expressed with explicit Rust state and runtime control. For real applications, prefer a structured async runtime or worker abstraction when you need cancellation, retries, bounded concurrency, or error propagation; a bare thread and channel are useful for demonstrating the frame-loop boundary, not a universal networking pattern.
+
+Two details above are load-bearing in practice:
+
+- the worker thread calls `ctx.request_repaint()` when a result arrives. Without it, eframe's frame loop is idle and the completed load is invisible until the next user input.
+- replacing `self.rx` with a fresh receiver silently drops the old one, so a superseded `send` returns `Err` instead of panicking. That drop is the natural cancellation for an outgrown load — the same role `FutureBuilder`'s disposal check plays.
 
 ### 7.5 Animation and motion
 
@@ -571,7 +664,8 @@ struct AnimationState {
 }
 
 impl eframe::App for AnimationState {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         let elapsed = self.start.elapsed().as_secs_f32();
         let t = (elapsed * 1.5).sin() * 0.5 + 0.5;
 
@@ -584,7 +678,10 @@ impl eframe::App for AnimationState {
             ui.painter().circle_filled(rect.center(), size / 2.0, egui::Color32::WHITE);
         });
 
-        ctx.request_repaint();
+        // This is a continuously running demo, so keep requesting throttled
+        // repaints. A finite animation should stop requesting repaints once
+        // its end time has been reached.
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
 }
 ```
@@ -630,6 +727,19 @@ enum AppEvent {
 ```
 
 This pattern maps naturally to the mental model of a Dart/Flutter app that reacts to user events, but it is implemented with explicit Rust enums and state transitions instead of widget rebuild callbacks.
+
+### 8.1 A practical ownership checklist
+
+Before adding a widget-like abstraction, decide:
+
+- who owns durable domain data;
+- who owns transient view state such as selection, focus, and open menus;
+- how background work reports success, failure, cancellation, and progress;
+- which IDs must remain stable when rows are reordered or screens are revisited;
+- which state is local to a viewport and which state is shared across viewports;
+- how state is serialized, migrated, and recovered when persistence data is stale.
+
+This checklist matters more than copying Flutter class names. A familiar API can hide Rust ownership decisions, but it cannot remove them.
 
 ---
 
@@ -706,21 +816,183 @@ That is the sweet spot: familiar mental structure, Rust-native execution model.
 
 ---
 
-## 10. Final takeaway
+## 10. Bootstrapping a real eframe app
+
+Section 4's first row (`runApp` -> `eframe::run_native`) is the one translation every app starts from, so it deserves a full skeleton.
+
+Flutter's `main()` + `runApp` chain becomes a `main()` that builds `NativeOptions` and hands eframe a factory for shared resources:
+
+```rust
+fn main() -> eframe::Result {
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("My app")
+            .with_inner_size([1024.0, 720.0])
+            .with_min_inner_size([300.0, 200.0]),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "My app",
+        options,
+        Box::new(|cc| Ok(Box::new(MyApp::new(cc)))),
+    )
+}
+```
+
+Translation:
+
+- `runApp` -> `eframe::run_native` with an app-creator factory
+- window title and sizing -> `ViewportBuilder`
+- one-time shared resources (fonts, textures, storage) -> `CreationContext`, injected in `MyApp::new(cc)`
+
+### 10.1 State persistence
+
+Flutter apps reach for `shared_preferences` or similar. eframe has a persistence lifecycle built in through the `App` trait:
+
+```rust
+impl eframe::App for MyApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "last_open_path", &self.last_open_path);
+    }
+}
+```
+
+- `save` is called by eframe when it persists application state; the exact timing is integration/backend-dependent and should not be treated as a transactional commit hook.
+- state is restored on startup by reading `cc.storage` inside `MyApp::new(cc)`.
+- egui's own widget memory (scroll positions, collapsed states) persists separately, via `egui::Memory`.
+
+Persist only data that can be safely serialized and migrated. Do not put open file handles, channels, thread handles, platform objects, or credentials in the persisted model. Treat missing, corrupt, and older-version values as normal startup cases.
+
+### 10.2 The iteration loop
+
+Flutter's `flutter run` with hot reload is the one workflow a Rust/egui app does not get back. The practical replacements:
+
+- `cargo watch -x run` for rebuild-and-relaunch on desktop
+- `trunk serve` for the WASM/web target, which reloads quickly
+- `hot-lib-reloader` for a hot-reload-like loop, best kept to lib logic and considered experimental
+
+---
+
+## 11. Testing egui apps (kittest)
+
+Flutter ships a testing ladder: unit tests, widget tests, golden tests, integration tests. Rust/egui has a direct analog in **kittest**, whose official integration is `egui_kittest`. Tests drive an AccessKit-backed accessibility tree, so they read like semantic widget tests rather than pixel assertions:
+
+```rust
+use egui::accesskit::Toggled;
+use egui_kittest::{Harness, kittest::Queryable};
+
+#[test]
+fn toggle_is_declarable_and_clickable() {
+    let mut loud = false;
+
+    let mut harness = Harness::new_ui(|ui| {
+        ui.checkbox(&mut loud, "Loud mode");
+    });
+
+    let toggle = harness.get_by_label("Loud mode");
+    assert_eq!(toggle.toggled(), Some(Toggled::False));
+    toggle.click();
+    harness.run();
+
+    assert_eq!(harness.get_by_label("Loud mode").toggled(), Some(Toggled::True));
+}
+```
+
+Translation:
+
+| Flutter testing | Rust/egui testing |
+| --- | --- |
+| unit tests for state logic | ordinary Rust tests over app-state structs (section 8) |
+| widget tests (finders + actions) | `egui_kittest` queries against the accessibility tree |
+| golden / screenshot tests | `harness.snapshot("name")` against committed images |
+| integration tests | kittest with an app-shaped harness and injected events |
+| semantics for screen readers | the same AccessKit tree, tested and shipped together |
+
+One deliberate pressure point since egui 0.37: kittest fails when an input widget has no accessible name, so accessibility is no longer optional polish — it is part of the test suite.
+
+---
+
+## 12. Where egui apps can run
+
+| Target | Status | Notes for a Flutter developer |
+| --- | --- | --- |
+| Windows / macOS / Linux | first-class | eframe ships native windows via wgpu or glow renderers |
+| Web (WASM) | supported | eframe compiles to wasm; build with `trunk`; WebGL2/WebGPU |
+| iOS / Android | available through evolving native/web paths | platform integration and mobile UX require more validation than desktop; see below |
+
+The honest part of this comparison:
+
+- egui is a **desktop-first, web-capable** framework. A Flutter team whose product is phone-first should treat egui as a tooling target rather than a full migration destination.
+- Mobile support is improving: the 0.36 release notes call out autocomplete, autocorrect, and IME support for iOS and Android through eframe web. That does not make egui equivalent to Flutter's mature mobile toolkit: GPU drivers, packaging, touch ergonomics, accessibility, navigation conventions, and platform services still need application-level validation.
+- In exchange, egui gives one Rust codebase with no per-platform theming divergence and no engine-imposed binary overhead negotiations.
+
+Choose the target from product requirements, not language preference. egui is strongest for desktop tools, inspectors, editors, visualizers, and browser-delivered applications. A phone-first consumer app should prototype its critical text input, navigation, accessibility, keyboard, and gesture flows before committing to a migration.
+
+---
+
+## 13. The egui ecosystem and its pub.dev parallels
+
+A Flutter developer is used to solving problems by adding a pub.dev package. The egui ecosystem is smaller but organized, and maps roughly like this:
+
+| pub.dev package | Rust/egui parallel |
+| --- | --- |
+| `fl_chart` | `egui_plot` |
+| `table_2` / `DataTable` | `egui_extras::TableBuilder` |
+| `provider` / `bloc` | plain structs, enums, and channels (section 8) |
+| `multi_split_view` / dockable IDE shells | `egui_dock` |
+| file pickers | `egui_file` |
+| notifications / snackbars | `egui-toast`, `egui-notify` |
+| icon fonts | `egui_phosphor`, plus egui 0.37 glyph rasterizing |
+| `flutter_test` widget testing | `egui_kittest` (section 11) |
+| constraint-based layouts | `egui_taffy` |
+| DevTools | `puffin` profiling, plus the egui inspection protocol and `egui_mcp` (section 14) |
+
+The zustand-like habit of reaching for a package should be replaced by reaching for a struct — most state needs are small enough that plain ownership is simpler than a library.
+
+---
+
+## 14. egui 0.35–0.37 changes that touch this catalog
+
+A short changelog for the period since this catalog's early drafts, prioritized by how much a Flutter developer will feel it:
+
+**0.37** (October 2026)
+
+- emoji and arbitrary system glyph rendering, via `Context::add_glyph_rasterizer` and `FontProvider` — icon fonts and non-Latin text stop being an afterthought.
+- `eframe::App` uses `ui(&mut self, &mut egui::Ui, &mut Frame)` as its required rendering method; older `App::update(Context, Frame)` examples are not valid for this version.
+- `Id::new` is deprecated in favor of `Id::unique` and `IdSalt`, which sharpens the section 2.1 discussion of identity management: unique IDs are now the default path, and deliberate `IdSalt` naming is the explicit way to share stable identities.
+- experimental theme/plugin mechanisms (`StyleProvider`, classes) — useful scaffolding for a theming layer, but not a Flutter-style Material theme system.
+- kittest gained video recording of test runs and fails tests on unnamed input widgets.
+
+**0.36** (August 2026)
+
+- autocomplete/autocorrect/IME working on iOS and Android (eframe web) — softens the mobile text-input caveats in section 2.1.
+- drag-to-open panels and OS window chrome that follows the app theme.
+
+**0.35** (June 2026)
+
+- the inspection protocol and `egui_mcp`: a running app is visible and drivable by tooling, which matters for both debugging (Flutter DevTools analog) and AI-assisted workflows.
+- `harfrust`-based kerning and ligatures, plus proper IME composition visuals.
+
+---
+
+## 15. Final takeaway
 
 The central truth is simple:
 
 Dart/Flutter developers already know the difficult parts of UI development: composition, layout, state, interaction, navigation, theming, forms, async updates, and architecture. Those ideas all transfer to egui, but the runtime model changes.
 
-The only thing that changes is the runtime model:
+The biggest change is the runtime model, but it is not the only change:
 
 - Dart/Flutter: widget tree + rebuild system
 - egui: app state + immediate UI emissions + response-driven input
+- Rust: ownership, borrowing, `Result`-based error handling, explicit concurrency, and compile-time types
+- eframe: desktop/web integration and a different packaging, persistence, and deployment story
 
-If this repository teaches that shift clearly, it will be highly valuable for developers moving from Dart/Flutter into Rust GUI development.
+If this repository teaches those boundaries clearly, it can be a useful migration guide. The safest translation is to preserve product and state semantics first, then choose egui primitives; mechanically renaming Flutter widgets produces a familiar-looking API without solving ownership, scheduling, accessibility, or platform behavior.
 
 ---
 
-## 11. License
+## 16. License
 
 This repository is intended as a learning and translation reference for developers moving from Dart/Flutter to Rust/egui.
